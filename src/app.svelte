@@ -113,6 +113,50 @@
     );
   }
 
+  function applyRoute(destination: string) {
+    const url = new URL(destination);
+    const parts = url.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+
+    if (parts[0] === 'player' || parts[0] === 'queue' || parts[0] === 'settings') {
+      activeView = parts[0];
+      return;
+    }
+
+    activeView = 'library';
+    selectedArtist = null;
+    selectedAlbum = null;
+
+    if (parts[0] !== 'library' || parts[1] !== 'artist' || !parts[2]) return;
+    selectedArtist = artists.find((artist) => (artist.id ?? artist.name) === parts[2]) ?? null;
+
+    if (selectedArtist && parts[3] === 'album' && parts[4]) {
+      selectedAlbum = selectedArtist.albums.find((album) => album.id === parts[4]) ?? null;
+    }
+  }
+
+  function navigateTo(hash: string, history: 'push' | 'replace' = 'push') {
+    void window.navigation.navigate(hash, { history }).finished?.catch(() => {});
+  }
+
+  function syncCurrentRoute() {
+    applyRoute(window.navigation.currentEntry?.url ?? window.location.href);
+  }
+
+  onMount(() => {
+    const handleNavigation = (event: NavigateEvent) => {
+      const destination = new URL(event.destination.url);
+      if (!event.canIntercept || destination.origin !== window.location.origin || !destination.hash.startsWith('#/')) return;
+
+      event.intercept({ handler: () => applyRoute(destination.toString()) });
+    };
+
+    window.navigation.addEventListener('navigate', handleNavigation);
+    if (window.location.hash.startsWith('#/')) syncCurrentRoute();
+    else navigateTo('#/library', 'replace');
+
+    return () => window.navigation.removeEventListener('navigate', handleNavigation);
+  });
+
   onMount(() => {
     const savedVolume = Number(localStorage.getItem(volumeStorageKey));
     if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 1) {
@@ -123,14 +167,14 @@
     try {
       const value = localStorage.getItem(authStorageKey);
       if (!value) {
-        activeView = 'settings';
+        navigateTo('#/settings', 'replace');
         return;
       }
 
       const savedAuth: unknown = JSON.parse(value);
       if (!isSavedAuth(savedAuth)) {
         localStorage.removeItem(authStorageKey);
-        activeView = 'settings';
+        navigateTo('#/settings', 'replace');
         return;
       }
 
@@ -143,24 +187,12 @@
     }
   });
 
-  function showLibraryRoot() {
-    activeView = 'library';
-    selectedArtist = null;
-    selectedAlbum = null;
+  function artistRoute(artist: Artist) {
+    return `#/library/artist/${encodeURIComponent(artist.id ?? artist.name)}`;
   }
 
-  function openArtist(artist: Artist) {
-    selectedArtist = artist;
-    selectedAlbum = null;
-  }
-
-  function openAlbum(album: Album) {
-    selectedAlbum = album;
-  }
-
-  function libraryBack() {
-    if (selectedAlbum) selectedAlbum = null;
-    else selectedArtist = null;
+  function albumRoute(artist: Artist, album: Album) {
+    return `${artistRoute(artist)}/album/${encodeURIComponent(album.id)}`;
   }
 
   function coverArtUrl(id?: string) {
@@ -476,7 +508,7 @@
   async function submitConnection(event: SubmitEvent) {
     event.preventDefault();
     await loadArtists();
-    if (!error) activeView = 'library';
+    if (!error) navigateTo('#/library');
   }
 
   async function loadArtists(savedAuth?: SavedAuth) {
@@ -508,6 +540,7 @@
         hasCachedLibrary = true;
         artists = cached.data;
         connectedHost = server;
+        syncCurrentRoute();
         loading = false;
         refreshing = true;
       } else {
@@ -531,6 +564,7 @@
 
       artists = freshArtists;
       connectedHost = server;
+      syncCurrentRoute();
     } catch (caught) {
       const message = connectionError(caught);
       if (hasCachedLibrary) {
@@ -681,7 +715,7 @@
   <section class="view library-view" class:hidden={activeView !== 'library'}>
     {#if connectedHost && !error}
       {#if selectedArtist}
-        <button type="button" class="back-button" onclick={libraryBack}>‹ Back</button>
+        <a class="back-button" href={selectedAlbum ? artistRoute(selectedArtist) : '#/library'}>‹ Back</a>
       {/if}
 
       <div class="section-heading">
@@ -717,7 +751,7 @@
         <div class="album-list">
           {#each selectedArtist.albums as album}
             <article class="album-row">
-              <button type="button" class="album-main" onclick={() => openAlbum(album)}>
+              <a class="album-main" href={albumRoute(selectedArtist, album)}>
                 <span class="cover album-cover">
                   {#if coverArtUrl(album.coverArt)}
                     <img src={coverArtUrl(album.coverArt)} alt="" loading="lazy" />
@@ -729,7 +763,7 @@
                   <strong>{album.name}</strong>
                   <small>{album.year ?? 'Unknown year'} · {album.tracks.length} tracks</small>
                 </span>
-              </button>
+              </a>
               <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>▶</button>
               <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>＋</button>
             </article>
@@ -741,7 +775,7 @@
         <div class="artist-grid">
           {#each artists as artist}
             <article class="artist-card">
-              <button type="button" class="artist-main" onclick={() => openArtist(artist)}>
+              <a class="artist-main" href={artistRoute(artist)}>
                 <span class="cover artist-cover">
                   {#if coverArtUrl(artistCoverArt(artist))}
                     <img src={coverArtUrl(artistCoverArt(artist))} alt="" loading="lazy" />
@@ -750,7 +784,7 @@
                   {/if}
                   <strong class="artist-name">{artist.name}</strong>
                 </span>
-              </button>
+              </a>
               <button type="button" class="artist-play" onclick={() => playArtist(artist)}>▶</button>
             </article>
           {/each}
@@ -766,13 +800,13 @@
         <span>♫</span>
         <h2>Connect your library</h2>
         <p>Add your Navidrome server to start listening.</p>
-        <button type="button" class="primary" onclick={() => activeView = 'settings'}>Open settings</button>
+        <a class="primary" href="#/settings">Open settings</a>
       </div>
     {/if}
   </section>
 
   {#if currentIndex >= 0 && queue[currentIndex] && activeView !== 'player'}
-    <button type="button" class="mini-player" onclick={() => activeView = 'player'}>
+    <a class="mini-player" href="#/player">
       <span class="mini-art">♫</span>
       <span class="mini-copy">
         <strong>{queue[currentIndex].title}</strong>
@@ -783,6 +817,7 @@
         role="button"
         tabindex="0"
         onclick={(event) => {
+          event.preventDefault();
           event.stopPropagation();
           togglePlayback();
         }}
@@ -790,22 +825,22 @@
           if (event.key === 'Enter' || event.key === ' ') togglePlayback();
         }}>{isPlaying ? 'Ⅱ' : '▶'}</span
       >
-    </button>
+    </a>
   {/if}
 
   <nav class="bottom-nav">
-    <button class:active={activeView === 'library'} type="button" onclick={showLibraryRoot}>
+    <a class:active={activeView === 'library'} href="#/library">
       <span>♫</span><small>Library</small>
-    </button>
-    <button class:active={activeView === 'player'} type="button" onclick={() => activeView = 'player'}>
+    </a>
+    <a class:active={activeView === 'player'} href="#/player">
       <span>▶</span><small>Player</small>
-    </button>
-    <button class:active={activeView === 'queue'} type="button" onclick={() => activeView = 'queue'}>
+    </a>
+    <a class:active={activeView === 'queue'} href="#/queue">
       <span>≡</span><small>Queue</small>
-    </button>
-    <button class:active={activeView === 'settings'} type="button" onclick={() => activeView = 'settings'}>
+    </a>
+    <a class:active={activeView === 'settings'} href="#/settings">
       <span>⚙</span><small>Settings</small>
-    </button>
+    </a>
   </nav>
 </main>
 
@@ -888,6 +923,11 @@
     accent-color: #8d7dff;
   }
 
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
   button {
     border: 0;
     border-radius: 999px;
@@ -907,6 +947,15 @@
     min-height: 2.8rem;
     padding: 0.7rem 1.1rem;
     background: #7565f6;
+  }
+
+  .primary {
+    display: inline-grid;
+    width: fit-content;
+    place-items: center;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 650;
   }
 
   .section-heading {
@@ -975,6 +1024,7 @@
   }
 
   .back-button {
+    display: inline-block;
     margin-bottom: 1rem;
     padding: 0.5rem 0.75rem;
     color: #bcb4ff;
@@ -1257,7 +1307,7 @@
     backdrop-filter: blur(14px);
   }
 
-  .bottom-nav button {
+  .bottom-nav a {
     display: grid;
     gap: 0.15rem;
     place-items: center;
@@ -1267,7 +1317,7 @@
     font-size: 1.05rem;
   }
 
-  .bottom-nav button.active {
+  .bottom-nav a.active {
     color: #bcb4ff;
     background: #222332;
   }
