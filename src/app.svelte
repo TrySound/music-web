@@ -23,6 +23,7 @@
   interface Album {
     artist?: string;
     artistId?: string;
+    coverArt?: string;
     id: string;
     name: string;
     tracks: Track[];
@@ -33,6 +34,7 @@
 
   interface Artist {
     albums: Album[];
+    coverArt?: string;
     id?: string;
     name: string;
   }
@@ -66,6 +68,8 @@
   type View = 'library' | 'player' | 'queue' | 'settings';
 
   let activeView: View = 'library';
+  let selectedArtist: Artist | null = null;
+  let selectedAlbum: Album | null = null;
   let host = '';
   let username = '';
   let password = '';
@@ -139,6 +143,45 @@
     }
   });
 
+  function showLibraryRoot() {
+    activeView = 'library';
+    selectedArtist = null;
+    selectedAlbum = null;
+  }
+
+  function openArtist(artist: Artist) {
+    selectedArtist = artist;
+    selectedAlbum = null;
+  }
+
+  function openAlbum(album: Album) {
+    selectedAlbum = album;
+  }
+
+  function libraryBack() {
+    if (selectedAlbum) selectedAlbum = null;
+    else selectedArtist = null;
+  }
+
+  function coverArtUrl(id?: string) {
+    if (!id || !activeAuth) return '';
+
+    const query = new URLSearchParams({
+      id,
+      u: activeAuth.username,
+      t: activeAuth.token,
+      s: activeAuth.salt,
+      v: '1.16.1',
+      c: 'navidrome-artists',
+      size: '500'
+    });
+    return `${activeAuth.host}/rest/getCoverArt.view?${query}`;
+  }
+
+  function artistCoverArt(artist: Artist) {
+    return artist.coverArt ?? artist.albums.find((album) => album.coverArt)?.coverArt;
+  }
+
   function albumQueueItems(artist: Artist, album: Album): QueueItem[] {
     return album.tracks.map((track) => ({
       album: album.name,
@@ -166,10 +209,6 @@
 
   function playArtist(artist: Artist) {
     replaceQueueAndPlay(artistQueueItems(artist));
-  }
-
-  function addArtistToQueue(artist: Artist) {
-    queue = [...queue, ...artistQueueItems(artist)];
   }
 
   function playTrack(artist: Artist, album: Album, track: Track) {
@@ -641,94 +680,81 @@
 
   <section class="view library-view" class:hidden={activeView !== 'library'}>
     {#if connectedHost && !error}
+      {#if selectedArtist}
+        <button type="button" class="back-button" onclick={libraryBack}>‹ Back</button>
+      {/if}
+
       <div class="section-heading">
         <div>
-          <span class="eyebrow">Your music</span>
-          <h2>{artists.length} artist{artists.length === 1 ? '' : 's'}</h2>
+          <span class="eyebrow">
+            {selectedAlbum ? selectedArtist?.name : selectedArtist ? 'Albums' : 'Your music'}
+          </span>
+          <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${artists.length} artists`}</h2>
         </div>
-        <button type="button" class="quiet" onclick={() => loadArtists(activeAuth ?? undefined)} disabled={loading || refreshing}>
-          {refreshing ? 'Checking…' : 'Refresh'}
-        </button>
+        {#if !selectedArtist}
+          <button type="button" class="quiet" onclick={() => loadArtists(activeAuth ?? undefined)} disabled={loading || refreshing}>
+            {refreshing ? 'Checking…' : 'Refresh'}
+          </button>
+        {/if}
       </div>
 
-      {#if artists.length > 0}
-        <ul class="music-list">
-          {#each artists as artist}
-            <li>
-              <details>
-                <summary>
-                  <strong>{artist.name}</strong>
-                  <button
-                    type="button"
-                    onclick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      playArtist(artist);
-                    }}>▶ Play</button
-                  >
-                  <button
-                    type="button"
-                    onclick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      addArtistToQueue(artist);
-                    }}>+ Add</button
-                  >
-                </summary>
-                {#if artist.albums.length > 0}
-                  <ul>
-                    {#each artist.albums as album}
-                      <li>
-                        <details>
-                          <summary>
-                            {album.name}{album.year ? ` (${album.year})` : ''}
-                            <button
-                              type="button"
-                              onclick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                playAlbum(artist, album);
-                              }}>▶ Play</button
-                            >
-                            <button
-                              type="button"
-                              onclick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                addAlbumToQueue(artist, album);
-                              }}>+ Add</button
-                            >
-                          </summary>
-                          {#if album.tracks.length > 0}
-                            <ul>
-                              {#each album.tracks as track}
-                                <li>
-                                  {track.track ? `${track.track}. ` : ''}{track.title}
-                                  <button
-                                    type="button"
-                                    onclick={() => playTrack(artist, album, track)}>▶ Play</button
-                                  >
-                                  <button
-                                    type="button"
-                                    onclick={() => addTrackToQueue(artist, album, track)}>+ Add</button
-                                  >
-                                </li>
-                              {/each}
-                            </ul>
-                          {:else}
-                            <span>No tracks</span>
-                          {/if}
-                        </details>
-                      </li>
-                    {/each}
-                  </ul>
-                {:else}
-                  <span>No albums</span>
-                {/if}
-              </details>
-            </li>
+      {#if selectedArtist && selectedAlbum}
+        <div class="track-list">
+          {#each selectedAlbum.tracks as track, index}
+            <div class="track-row">
+              <button type="button" class="track-main" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>
+                <span class="track-number">{track.track ?? index + 1}</span>
+                <span>{track.title}</span>
+              </button>
+              <button type="button" class="row-action" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>▶</button>
+              <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>＋</button>
+            </div>
+          {:else}
+            <div class="empty-state"><p>No tracks found.</p></div>
           {/each}
-        </ul>
+        </div>
+      {:else if selectedArtist}
+        <div class="album-list">
+          {#each selectedArtist.albums as album}
+            <article class="album-row">
+              <button type="button" class="album-main" onclick={() => openAlbum(album)}>
+                <span class="cover album-cover">
+                  {#if coverArtUrl(album.coverArt)}
+                    <img src={coverArtUrl(album.coverArt)} alt="" loading="lazy" />
+                  {:else}
+                    <span>♫</span>
+                  {/if}
+                </span>
+                <span class="album-copy">
+                  <strong>{album.name}</strong>
+                  <small>{album.year ?? 'Unknown year'} · {album.tracks.length} tracks</small>
+                </span>
+              </button>
+              <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>▶</button>
+              <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>＋</button>
+            </article>
+          {:else}
+            <div class="empty-state"><p>No albums found.</p></div>
+          {/each}
+        </div>
+      {:else if artists.length > 0}
+        <div class="artist-grid">
+          {#each artists as artist}
+            <article class="artist-card">
+              <button type="button" class="artist-main" onclick={() => openArtist(artist)}>
+                <span class="cover artist-cover">
+                  {#if coverArtUrl(artistCoverArt(artist))}
+                    <img src={coverArtUrl(artistCoverArt(artist))} alt="" loading="lazy" />
+                  {:else}
+                    <span>♫</span>
+                  {/if}
+                  <strong class="artist-name">{artist.name}</strong>
+                </span>
+              </button>
+              <button type="button" class="artist-play" onclick={() => playArtist(artist)}>▶</button>
+            </article>
+          {/each}
+        </div>
       {:else}
         <div class="empty-state">
           <span>♫</span>
@@ -768,7 +794,7 @@
   {/if}
 
   <nav class="bottom-nav">
-    <button class:active={activeView === 'library'} type="button" onclick={() => activeView = 'library'}>
+    <button class:active={activeView === 'library'} type="button" onclick={showLibraryRoot}>
       <span>♫</span><small>Library</small>
     </button>
     <button class:active={activeView === 'player'} type="button" onclick={() => activeView = 'player'}>
@@ -948,66 +974,171 @@
     background: #7565f6;
   }
 
-  .music-list,
-  .music-list ul {
-    margin: 0;
-    padding: 0;
-    list-style: none;
+  .back-button {
+    margin-bottom: 1rem;
+    padding: 0.5rem 0.75rem;
+    color: #bcb4ff;
+    background: transparent;
   }
 
-  .music-list > li {
-    margin-bottom: 0.65rem;
+  .artist-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.8rem;
+  }
+
+  .artist-card {
+    position: relative;
+    min-width: 0;
     overflow: hidden;
     border: 1px solid #272c38;
-    border-radius: 0.85rem;
+    border-radius: 0;
     background: #171b23;
   }
 
-  .music-list summary {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    min-height: 3.25rem;
-    padding: 0.7rem 0.8rem;
-    cursor: pointer;
+  .artist-main,
+  .album-main,
+  .track-main {
+    border-radius: 0;
+    color: inherit;
+    background: transparent;
+    text-align: left;
   }
 
-  .music-list summary strong,
-  .music-list summary::marker {
-    color: #f5f6f8;
+  .artist-main {
+    display: grid;
+    width: 100%;
+    padding: 0;
   }
 
-  .music-list summary strong,
-  .music-list details details summary {
-    flex: 1;
-  }
-
-  .music-list summary button {
+  .cover {
+    position: relative;
+    display: grid;
+    overflow: hidden;
     flex: none;
-    padding: 0.45rem 0.65rem;
+    place-items: center;
+    color: #bcb4ff;
+    background: linear-gradient(145deg, #292845, #44293d);
   }
 
-  .music-list details > ul {
-    border-top: 1px solid #272c38;
+  .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
-  .music-list details details {
-    border-bottom: 1px solid #252a34;
-    background: #12161d;
+  .artist-cover {
+    width: 100%;
+    aspect-ratio: 1;
+    font-size: 2.2rem;
   }
 
-  .music-list details details > ul {
-    padding: 0.35rem 0.8rem 0.7rem 2rem;
+  .artist-cover::after {
+    position: absolute;
+    inset: 35% 0 0;
+    content: '';
+    background: linear-gradient(transparent, rgb(4 5 8 / 92%));
   }
 
-  .music-list details details > ul li {
-    padding: 0.45rem 0;
-    color: #c9ced7;
+  .artist-name {
+    position: absolute;
+    z-index: 1;
+    right: 0.7rem;
+    bottom: 0.65rem;
+    left: 0.7rem;
+    overflow: hidden;
+    color: white;
+    font-size: 0.9rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .music-list details details > ul button {
-    margin-left: 0.3rem;
-    padding: 0.35rem 0.55rem;
+  .artist-play {
+    position: absolute;
+    z-index: 2;
+    top: 0.55rem;
+    right: 0.55rem;
+    display: grid;
+    width: 2.2rem;
+    height: 2.2rem;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgb(255 255 255 / 25%);
+    background: rgb(8 10 15 / 72%);
+    backdrop-filter: blur(8px);
+  }
+
+  .album-list,
+  .track-list {
+    display: grid;
+  }
+
+  .album-row,
+  .track-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    border-bottom: 1px solid #272c38;
+  }
+
+  .album-main {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    padding: 0.65rem 0;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .album-cover {
+    width: 3.8rem;
+    height: 3.8rem;
+    border-radius: 0.55rem;
+  }
+
+  .album-copy {
+    display: grid;
+    min-width: 0;
+  }
+
+  .album-copy strong,
+  .album-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .track-main {
+    display: flex;
+    min-width: 0;
+    min-height: 3.5rem;
+    flex: 1;
+    padding: 0.65rem 0;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .track-main > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .track-number {
+    width: 1.5rem;
+    flex: none;
+    color: #737b8b;
+    text-align: right;
+  }
+
+  .row-action {
+    width: 2.35rem;
+    height: 2.35rem;
+    flex: none;
+    padding: 0;
+    color: #bcb4ff;
+    background: transparent;
+    font-size: 1rem;
   }
 
   .queue-view ol {
