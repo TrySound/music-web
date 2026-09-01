@@ -11,6 +11,13 @@
     track?: number;
   }
 
+  interface QueueItem {
+    album: string;
+    artist: string;
+    id: string;
+    title: string;
+  }
+
   interface Album {
     artist?: string;
     artistId?: string;
@@ -57,6 +64,7 @@
   let username = '';
   let password = '';
   let artists: Artist[] = [];
+  let queue: QueueItem[] = [];
   let loading = false;
   let error = '';
   let connectedHost = '';
@@ -99,6 +107,47 @@
       localStorage.removeItem(authStorageKey);
     }
   });
+
+  function albumQueueItems(artist: Artist, album: Album): QueueItem[] {
+    return album.tracks.map((track) => ({
+      album: album.name,
+      artist: artist.name,
+      id: track.id,
+      title: track.title
+    }));
+  }
+
+  function artistQueueItems(artist: Artist): QueueItem[] {
+    return artist.albums.flatMap((album) => albumQueueItems(artist, album));
+  }
+
+  function trackQueueItem(artist: Artist, album: Album, track: Track): QueueItem {
+    return { album: album.name, artist: artist.name, id: track.id, title: track.title };
+  }
+
+  function playAlbum(artist: Artist, album: Album) {
+    queue = albumQueueItems(artist, album);
+  }
+
+  function addAlbumToQueue(artist: Artist, album: Album) {
+    queue = [...queue, ...albumQueueItems(artist, album)];
+  }
+
+  function playArtist(artist: Artist) {
+    queue = artistQueueItems(artist);
+  }
+
+  function addArtistToQueue(artist: Artist) {
+    queue = [...queue, ...artistQueueItems(artist)];
+  }
+
+  function playTrack(artist: Artist, album: Album, track: Track) {
+    queue = [trackQueueItem(artist, album, track)];
+  }
+
+  function addTrackToQueue(artist: Artist, album: Album, track: Track) {
+    queue = [...queue, trackQueueItem(artist, album, track)];
+  }
 
   async function loadAlbums(server: string, authQuery: URLSearchParams) {
     const albums: ApiAlbum[] = [];
@@ -293,6 +342,20 @@
     <p class="error" role="alert">{error}</p>
   {/if}
 
+  <section>
+    <h2>Queue</h2>
+    {#if queue.length > 0}
+      <button type="button" onclick={() => queue = []}>Clear queue</button>
+      <ol>
+        {#each queue as item}
+          <li>{item.title} — {item.artist}, {item.album}</li>
+        {/each}
+      </ol>
+    {:else}
+      <p>The queue is empty.</p>
+    {/if}
+  </section>
+
   {#if connectedHost && !error}
     <section aria-live="polite">
       <h2>Artists</h2>
@@ -303,17 +366,63 @@
           {#each artists as artist}
             <li>
               <details>
-                <summary><strong>{artist.name}</strong></summary>
+                <summary>
+                  <strong>{artist.name}</strong>
+                  <button
+                    type="button"
+                    onclick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      playArtist(artist);
+                    }}>▶ Play</button
+                  >
+                  <button
+                    type="button"
+                    onclick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      addArtistToQueue(artist);
+                    }}>+ Add</button
+                  >
+                </summary>
                 {#if artist.albums.length > 0}
                   <ul>
                     {#each artist.albums as album}
                       <li>
                         <details>
-                          <summary>{album.name}{album.year ? ` (${album.year})` : ''}</summary>
+                          <summary>
+                            {album.name}{album.year ? ` (${album.year})` : ''}
+                            <button
+                              type="button"
+                              onclick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                playAlbum(artist, album);
+                              }}>▶ Play</button
+                            >
+                            <button
+                              type="button"
+                              onclick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                addAlbumToQueue(artist, album);
+                              }}>+ Add</button
+                            >
+                          </summary>
                           {#if album.tracks.length > 0}
                             <ul>
                               {#each album.tracks as track}
-                                <li>{track.track ? `${track.track}. ` : ''}{track.title}</li>
+                                <li>
+                                  {track.track ? `${track.track}. ` : ''}{track.title}
+                                  <button
+                                    type="button"
+                                    onclick={() => playTrack(artist, album, track)}>▶ Play</button
+                                  >
+                                  <button
+                                    type="button"
+                                    onclick={() => addTrackToQueue(artist, album, track)}>+ Add</button
+                                  >
+                                </li>
                               {/each}
                             </ul>
                           {:else}
