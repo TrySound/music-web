@@ -63,6 +63,9 @@
     salt: string;
   }
 
+  type View = 'library' | 'player' | 'queue' | 'settings';
+
+  let activeView: View = 'library';
   let host = '';
   let username = '';
   let password = '';
@@ -115,11 +118,15 @@
 
     try {
       const value = localStorage.getItem(authStorageKey);
-      if (!value) return;
+      if (!value) {
+        activeView = 'settings';
+        return;
+      }
 
       const savedAuth: unknown = JSON.parse(value);
       if (!isSavedAuth(savedAuth)) {
         localStorage.removeItem(authStorageKey);
+        activeView = 'settings';
         return;
       }
 
@@ -239,6 +246,11 @@
     } else {
       audio.pause();
     }
+  }
+
+  function playQueueIndex(index: number) {
+    currentIndex = index;
+    void playCurrent();
   }
 
   function nextTrack() {
@@ -422,6 +434,12 @@
     return caught instanceof Error ? caught.message : 'Could not load artists.';
   }
 
+  async function submitConnection(event: SubmitEvent) {
+    event.preventDefault();
+    await loadArtists();
+    if (!error) activeView = 'library';
+  }
+
   async function loadArtists(savedAuth?: SavedAuth) {
     loading = true;
     refreshing = false;
@@ -492,10 +510,11 @@
   <title>Navidrome Artists</title>
 </svelte:head>
 
-<main>
-  <h1>Navidrome artists</h1>
-
-  <form onsubmit={(event) => { event.preventDefault(); loadArtists(); }}>
+<main class="app-shell">
+  <section class="view settings-view" class:hidden={activeView !== 'settings'}>
+    <h2>Connect to your music</h2>
+    <p class="muted">Enter your Navidrome server details. Authentication stays on this device.</p>
+    <form onsubmit={submitConnection}>
     <label>
       Host
       <input
@@ -521,8 +540,9 @@
       {loading ? 'Loading…' : refreshing ? 'Refreshing…' : 'Load artists'}
     </button>
 
-    <small>Authentication is saved in this browser after a successful login.</small>
-  </form>
+      <small>Authentication is saved in this browser after a successful login.</small>
+    </form>
+  </section>
 
   {#if error}
     <p class="error" role="alert">{error}</p>
@@ -534,8 +554,8 @@
     <p>Refreshing metadata in the background…</p>
   {/if}
 
-  <section>
-    <h2>Player</h2>
+  <section class="view player-view" class:hidden={activeView !== 'player'}>
+    <div class="artwork">♫</div>
     <audio
       bind:this={audio}
       preload="metadata"
@@ -600,8 +620,13 @@
     {/if}
   </section>
 
-  <section>
-    <h2>Queue</h2>
+  <section class="view queue-view" class:hidden={activeView !== 'queue'}>
+    <div class="section-heading">
+      <div>
+        <span class="eyebrow">Up next</span>
+        <h2>{queue.length} track{queue.length === 1 ? '' : 's'}</h2>
+      </div>
+    </div>
     {#if queue.length > 0}
       <button type="button" onclick={clearQueue}>Clear queue</button>
       <ol>
@@ -614,13 +639,20 @@
     {/if}
   </section>
 
-  {#if connectedHost && !error}
-    <section aria-live="polite">
-      <h2>Artists</h2>
-      <p>{artists.length} artist{artists.length === 1 ? '' : 's'} from {connectedHost}</p>
+  <section class="view library-view" class:hidden={activeView !== 'library'}>
+    {#if connectedHost && !error}
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Your music</span>
+          <h2>{artists.length} artist{artists.length === 1 ? '' : 's'}</h2>
+        </div>
+        <button type="button" class="quiet" onclick={() => loadArtists(activeAuth ?? undefined)} disabled={loading || refreshing}>
+          {refreshing ? 'Checking…' : 'Refresh'}
+        </button>
+      </div>
 
       {#if artists.length > 0}
-        <ul>
+        <ul class="music-list">
           {#each artists as artist}
             <li>
               <details>
@@ -698,61 +730,419 @@
           {/each}
         </ul>
       {:else}
-        <p>No artists found.</p>
+        <div class="empty-state">
+          <span>♫</span>
+          <p>No artists found.</p>
+        </div>
       {/if}
-    </section>
+    {:else if !loading}
+      <div class="empty-state">
+        <span>♫</span>
+        <h2>Connect your library</h2>
+        <p>Add your Navidrome server to start listening.</p>
+        <button type="button" class="primary" onclick={() => activeView = 'settings'}>Open settings</button>
+      </div>
+    {/if}
+  </section>
+
+  {#if currentIndex >= 0 && queue[currentIndex] && activeView !== 'player'}
+    <button type="button" class="mini-player" onclick={() => activeView = 'player'}>
+      <span class="mini-art">♫</span>
+      <span class="mini-copy">
+        <strong>{queue[currentIndex].title}</strong>
+        <small>{queue[currentIndex].artist}</small>
+      </span>
+      <span
+        class="mini-control"
+        role="button"
+        tabindex="0"
+        onclick={(event) => {
+          event.stopPropagation();
+          togglePlayback();
+        }}
+        onkeydown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') togglePlayback();
+        }}>{isPlaying ? 'Ⅱ' : '▶'}</span
+      >
+    </button>
   {/if}
+
+  <nav class="bottom-nav">
+    <button class:active={activeView === 'library'} type="button" onclick={() => activeView = 'library'}>
+      <span>♫</span><small>Library</small>
+    </button>
+    <button class:active={activeView === 'player'} type="button" onclick={() => activeView = 'player'}>
+      <span>▶</span><small>Player</small>
+    </button>
+    <button class:active={activeView === 'queue'} type="button" onclick={() => activeView = 'queue'}>
+      <span>≡</span><small>Queue</small>
+    </button>
+    <button class:active={activeView === 'settings'} type="button" onclick={() => activeView = 'settings'}>
+      <span>⚙</span><small>Settings</small>
+    </button>
+  </nav>
 </main>
 
 <style>
-  main {
-    width: min(100% - 2rem, 42rem);
-    margin: 2rem auto;
+  :global(body) {
+    background: #080a0f;
+    color: #f5f6f8;
+  }
+
+  .app-shell {
+    position: relative;
+    width: 100%;
+    max-width: 32rem;
+    min-height: 100dvh;
+    margin: 0 auto;
+    padding-bottom: 10.5rem;
+    background: #10131a;
+  }
+
+  h2,
+  p {
+    margin-top: 0;
+  }
+
+  h2 {
+    margin-bottom: 0.5rem;
+    font-size: 1.25rem;
+  }
+
+  .eyebrow {
+    display: block;
+    margin-bottom: 0.15rem;
+    color: #979ead;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .view {
+    padding: 1.25rem;
+  }
+
+  .hidden {
+    display: none;
+  }
+
+  .muted,
+  small {
+    color: #979ead;
+  }
+
+  form,
+  label {
+    display: grid;
+    gap: 0.45rem;
   }
 
   form {
-    display: grid;
     gap: 1rem;
-    padding-bottom: 1.5rem;
-    border-bottom: 1px solid #ccc;
+    margin-top: 1.5rem;
   }
 
-  label {
-    display: grid;
-    gap: 0.25rem;
-  }
-
-  input {
+  input:not([type='range']) {
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #999;
-    border-radius: 0.2rem;
+    padding: 0.8rem 0.9rem;
+    border: 1px solid #343a48;
+    border-radius: 0.7rem;
+    outline: none;
+    color: #f5f6f8;
+    background: #191d27;
+  }
+
+  input:not([type='range']):focus {
+    border-color: #8d7dff;
+  }
+
+  input[type='range'] {
+    width: 100%;
+    accent-color: #8d7dff;
   }
 
   button {
-    width: fit-content;
-    padding: 0.5rem 0.8rem;
+    border: 0;
+    border-radius: 999px;
+    color: #f5f6f8;
+    background: #292f3c;
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 650;
   }
 
   button:disabled {
-    cursor: default;
+    opacity: 0.4;
+  }
+
+  form > button,
+  .primary {
+    min-height: 2.8rem;
+    padding: 0.7rem 1.1rem;
+    background: #7565f6;
+  }
+
+  .section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .section-heading h2 {
+    margin: 0;
+  }
+
+  .quiet {
+    padding: 0.55rem 0.8rem;
+    color: #bcb4ff;
+    background: #252438;
+  }
+
+  .artwork {
+    display: grid;
+    width: min(76vw, 21rem);
+    aspect-ratio: 1;
+    margin: 1rem auto 2rem;
+    place-items: center;
+    border-radius: 1.5rem;
+    color: rgb(255 255 255 / 85%);
+    background: linear-gradient(145deg, #7665f6, #d35b91);
+    box-shadow: 0 1.5rem 3.5rem rgb(0 0 0 / 38%);
+    font-size: 5rem;
+  }
+
+  .player-view > p {
+    margin-bottom: 1.4rem;
+    text-align: center;
+  }
+
+  .player-view > p strong {
+    font-size: 1.25rem;
+  }
+
+  .player-view label {
+    margin-top: 1.25rem;
+    color: #b8bec9;
+    font-size: 0.78rem;
   }
 
   .controls {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
   }
 
-  section > label {
-    margin: 0.75rem 0;
+  .controls button {
+    min-width: 4.7rem;
+    min-height: 2.8rem;
+    padding: 0.6rem;
+  }
+
+  .controls button:nth-child(2) {
+    min-width: 4.2rem;
+    min-height: 4.2rem;
+    background: #7565f6;
+  }
+
+  .music-list,
+  .music-list ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .music-list > li {
+    margin-bottom: 0.65rem;
+    overflow: hidden;
+    border: 1px solid #272c38;
+    border-radius: 0.85rem;
+    background: #171b23;
+  }
+
+  .music-list summary {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 3.25rem;
+    padding: 0.7rem 0.8rem;
+    cursor: pointer;
+  }
+
+  .music-list summary strong,
+  .music-list summary::marker {
+    color: #f5f6f8;
+  }
+
+  .music-list summary strong,
+  .music-list details details summary {
+    flex: 1;
+  }
+
+  .music-list summary button {
+    flex: none;
+    padding: 0.45rem 0.65rem;
+  }
+
+  .music-list details > ul {
+    border-top: 1px solid #272c38;
+  }
+
+  .music-list details details {
+    border-bottom: 1px solid #252a34;
+    background: #12161d;
+  }
+
+  .music-list details details > ul {
+    padding: 0.35rem 0.8rem 0.7rem 2rem;
+  }
+
+  .music-list details details > ul li {
+    padding: 0.45rem 0;
+    color: #c9ced7;
+  }
+
+  .music-list details details > ul button {
+    margin-left: 0.3rem;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .queue-view ol {
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .queue-view ol li {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid #272c38;
+    color: #c9ced7;
+  }
+
+  .empty-state {
+    display: grid;
+    min-height: 55dvh;
+    place-items: center;
+    align-content: center;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .empty-state > span {
+    display: grid;
+    width: 5rem;
+    height: 5rem;
+    margin-bottom: 1rem;
+    place-items: center;
+    border-radius: 1.4rem;
+    color: #bcb4ff;
+    background: #252438;
+    font-size: 2rem;
+  }
+
+  .empty-state p {
+    color: #979ead;
   }
 
   .error {
-    color: #b00020;
+    margin: 0.75rem 1.25rem;
+    padding: 0.75rem;
+    border-radius: 0.7rem;
+    color: #ff9aa9;
+    background: #351c25;
+    font-size: 0.85rem;
   }
 
-  ul {
-    padding-left: 1.5rem;
+  .mini-player {
+    position: fixed;
+    z-index: 20;
+    right: 0.6rem;
+    bottom: 4.8rem;
+    left: 0.6rem;
+    display: flex;
+    max-width: 30.8rem;
+    min-height: 4rem;
+    margin: 0 auto;
+    padding: 0.5rem;
+    align-items: center;
+    gap: 0.7rem;
+    border: 1px solid #343a48;
+    border-radius: 0.9rem;
+    text-align: left;
+    background: #1c212b;
+    box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 45%);
+  }
+
+  .mini-art {
+    display: grid;
+    width: 3rem;
+    height: 3rem;
+    flex: none;
+    place-items: center;
+    border-radius: 0.65rem;
+    background: linear-gradient(145deg, #7665f6, #d35b91);
+  }
+
+  .mini-copy {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mini-copy strong,
+  .mini-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mini-control {
+    display: grid;
+    width: 2.7rem;
+    height: 2.7rem;
+    place-items: center;
+    border-radius: 50%;
+    background: #7565f6;
+  }
+
+  .bottom-nav {
+    position: fixed;
+    z-index: 20;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    width: 100%;
+    max-width: 32rem;
+    min-height: 4.25rem;
+    margin: 0 auto;
+    padding: 0.35rem 0.4rem max(0.35rem, env(safe-area-inset-bottom));
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid #292f3b;
+    background: rgb(17 20 27 / 97%);
+    backdrop-filter: blur(14px);
+  }
+
+  .bottom-nav button {
+    display: grid;
+    gap: 0.15rem;
+    place-items: center;
+    border-radius: 0.65rem;
+    color: #8f96a5;
+    background: transparent;
+    font-size: 1.05rem;
+  }
+
+  .bottom-nav button.active {
+    color: #bcb4ff;
+    background: #222332;
+  }
+
+  .bottom-nav small {
+    color: inherit;
+    font-size: 0.65rem;
   }
 </style>
