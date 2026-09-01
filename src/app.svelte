@@ -1,5 +1,8 @@
 <script lang="ts">
   import { md5 } from 'js-md5';
+  import { onMount } from 'svelte';
+
+  const authStorageKey = 'navidrome-auth';
 
   interface Artist {
     id?: string;
@@ -18,6 +21,13 @@
 
   interface SubsonicEnvelope {
     'subsonic-response'?: SubsonicResponse;
+  }
+
+  interface SavedAuth {
+    host: string;
+    username: string;
+    token: string;
+    salt: string;
   }
 
   let host = '';
@@ -39,17 +49,47 @@
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  async function loadArtists() {
+  function isSavedAuth(value: unknown): value is SavedAuth {
+    if (!value || typeof value !== 'object') return false;
+
+    const auth = value as Record<string, unknown>;
+    return ['host', 'username', 'token', 'salt'].every(
+      (key) => typeof auth[key] === 'string' && auth[key].length > 0
+    );
+  }
+
+  onMount(() => {
+    try {
+      const value = localStorage.getItem(authStorageKey);
+      if (!value) return;
+
+      const savedAuth: unknown = JSON.parse(value);
+      if (!isSavedAuth(savedAuth)) {
+        localStorage.removeItem(authStorageKey);
+        return;
+      }
+
+      host = savedAuth.host;
+      username = savedAuth.username;
+      void loadArtists(savedAuth);
+    } catch {
+      localStorage.removeItem(authStorageKey);
+    }
+  });
+
+  async function loadArtists(savedAuth?: SavedAuth) {
     loading = true;
     error = '';
     artists = [];
 
     try {
-      const server = normalizeHost(host.trim());
-      const salt = createSalt();
+      const server = normalizeHost(savedAuth?.host ?? host.trim());
+      const requestUsername = savedAuth?.username ?? username;
+      const salt = savedAuth?.salt ?? createSalt();
+      const token = savedAuth?.token ?? md5(password + salt);
       const query = new URLSearchParams({
-        u: username,
-        t: md5(password + salt),
+        u: requestUsername,
+        t: token,
         s: salt,
         v: '1.16.1',
         c: 'navidrome-artists',
@@ -71,6 +111,11 @@
       if (result.status !== 'ok') {
         throw new Error(result.error?.message || 'Navidrome rejected the request.');
       }
+
+      localStorage.setItem(
+        authStorageKey,
+        JSON.stringify({ host: server, username: requestUsername, token, salt } satisfies SavedAuth)
+      );
 
       const indexes = result.artists?.index ?? [];
       artists = indexes
@@ -121,6 +166,8 @@
     <button type="submit" disabled={loading}>
       {loading ? 'Loading…' : 'Load artists'}
     </button>
+
+    <small>Authentication is saved in this browser after a successful login.</small>
   </form>
 
   {#if error}
