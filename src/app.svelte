@@ -1,6 +1,7 @@
 <script lang="ts">
   import { md5 } from 'js-md5';
   import { onMount } from 'svelte';
+  import { loadLibraryCache, saveLibraryCache } from './library-cache';
 
   const authStorageKey = 'navidrome-auth';
   const volumeStorageKey = 'navidrome-volume';
@@ -48,6 +49,7 @@
     artists?: { index?: ArtistIndex[] };
     albumList2?: { album?: ApiAlbum[] };
     album?: { song?: Track[] };
+    indexes?: { lastModified?: number | string };
   }
 
   interface SubsonicEnvelope {
@@ -75,6 +77,8 @@
   let playbackError = '';
   let audio: HTMLAudioElement;
   let loading = false;
+  let refreshing = false;
+  let refreshError = '';
   let error = '';
   let connectedHost = '';
 
@@ -339,16 +343,100 @@
     return tracksByAlbumId;
   }
 
+  async function getLastModified(
+    server: string,
+    authQuery: URLSearchParams,
+    cachedLastModified?: number
+  ) {
+    const query = new URLSearchParams(authQuery);
+    if (cachedLastModified !== undefined) {
+      query.set('ifModifiedSince', String(cachedLastModified));
+    }
+
+    const response = await fetch(`${server}/rest/getIndexes.view?${query}`);
+    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+
+    const body: SubsonicEnvelope = await response.json();
+    const result = body['subsonic-response'];
+    if (!result) throw new Error('The server returned an unexpected response.');
+    if (result.status !== 'ok') {
+      throw new Error(result.error?.message || 'Navidrome rejected the request.');
+    }
+
+    if (!result.indexes) return cachedLastModified ?? null;
+    const lastModified = Number(result.indexes.lastModified);
+    return Number.isFinite(lastModified) ? lastModified : null;
+  }
+
+  async function fetchLibrary(server: string, authQuery: URLSearchParams) {
+    const response = await fetch(`${server}/rest/getArtists.view?${authQuery}`);
+    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+
+    const body: SubsonicEnvelope = await response.json();
+    const result = body['subsonic-response'];
+    if (!result) throw new Error('The server returned an unexpected response.');
+    if (result.status !== 'ok') {
+      throw new Error(result.error?.message || 'Navidrome rejected the request.');
+    }
+
+    const apiAlbums = await loadAlbums(server, authQuery);
+    const tracksByAlbumId = await loadTracks(server, authQuery, apiAlbums);
+    const albumsByArtistId = new Map<string, Album[]>();
+    const albumsByArtistName = new Map<string, Album[]>();
+
+    for (const apiAlbum of apiAlbums) {
+      const album: Album = {
+        ...apiAlbum,
+        tracks: tracksByAlbumId.get(apiAlbum.id) ?? []
+      };
+      const map = album.artistId ? albumsByArtistId : albumsByArtistName;
+      const key = album.artistId ?? album.artist;
+      if (!key) continue;
+      map.set(key, [...(map.get(key) ?? []), album]);
+    }
+
+    const indexes = result.artists?.index ?? [];
+    return indexes
+      .flatMap((index) => index.artist ?? [])
+      .map((artist) => ({
+        ...artist,
+        albums:
+          (artist.id ? albumsByArtistId.get(artist.id) : undefined) ??
+          albumsByArtistName.get(artist.name) ??
+          []
+      }))
+      .map((artist) => ({
+        ...artist,
+        albums: artist.albums.sort(
+          (a, b) => (a.year ?? Number.MAX_SAFE_INTEGER) - (b.year ?? Number.MAX_SAFE_INTEGER) ||
+            a.name.localeCompare(b.name)
+        )
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function connectionError(caught: unknown) {
+    if (caught instanceof TypeError) {
+      return 'Could not reach the server. Check the host and its CORS settings.';
+    }
+    return caught instanceof Error ? caught.message : 'Could not load artists.';
+  }
+
   async function loadArtists(savedAuth?: SavedAuth) {
     loading = true;
+    refreshing = false;
     error = '';
-    artists = [];
+    refreshError = '';
+
+    let hasCachedLibrary = false;
 
     try {
       const server = normalizeHost(savedAuth?.host ?? host.trim());
       const requestUsername = savedAuth?.username ?? username;
       const salt = savedAuth?.salt ?? createSalt();
       const token = savedAuth?.token ?? md5(password + salt);
+      const credentials = { host: server, username: requestUsername, token, salt };
+      const cacheKey = `${server}\n${requestUsername}`;
       const query = new URLSearchParams({
         u: requestUsername,
         t: token,
@@ -357,69 +445,45 @@
         c: 'navidrome-artists',
         f: 'json'
       });
-      const response = await fetch(`${server}/rest/getArtists.view?${query}`);
 
-      if (!response.ok) {
-        throw new Error(`The server returned HTTP ${response.status}.`);
+      const cached = await loadLibraryCache<Artist[]>(cacheKey).catch(() => null);
+      if (cached) {
+        hasCachedLibrary = true;
+        artists = cached.data;
+        connectedHost = server;
+        loading = false;
+        refreshing = true;
+      } else {
+        artists = [];
+        connectedHost = '';
       }
 
-      const body: SubsonicEnvelope = await response.json();
-      const result = body['subsonic-response'];
+      activeAuth = credentials;
+      const lastModified = await getLastModified(server, query, cached?.lastModified);
+      localStorage.setItem(authStorageKey, JSON.stringify(credentials));
 
-      if (!result) {
-        throw new Error('The server returned an unexpected response.');
-      }
+      if (cached && lastModified === cached.lastModified) return;
 
-      if (result.status !== 'ok') {
-        throw new Error(result.error?.message || 'Navidrome rejected the request.');
-      }
+      refreshing = hasCachedLibrary;
+      const freshArtists = await fetchLibrary(server, query);
+      await saveLibraryCache(cacheKey, {
+        data: freshArtists,
+        lastModified: lastModified ?? 0,
+        savedAt: Date.now()
+      });
 
-      activeAuth = { host: server, username: requestUsername, token, salt };
-      localStorage.setItem(authStorageKey, JSON.stringify(activeAuth));
-
-      const apiAlbums = await loadAlbums(server, query);
-      const tracksByAlbumId = await loadTracks(server, query, apiAlbums);
-      const albumsByArtistId = new Map<string, Album[]>();
-      const albumsByArtistName = new Map<string, Album[]>();
-
-      for (const apiAlbum of apiAlbums) {
-        const album: Album = {
-          ...apiAlbum,
-          tracks: tracksByAlbumId.get(apiAlbum.id) ?? []
-        };
-        const map = album.artistId ? albumsByArtistId : albumsByArtistName;
-        const key = album.artistId ?? album.artist;
-        if (!key) continue;
-        map.set(key, [...(map.get(key) ?? []), album]);
-      }
-
-      const indexes = result.artists?.index ?? [];
-      artists = indexes
-        .flatMap((index) => index.artist ?? [])
-        .map((artist) => ({
-          ...artist,
-          albums:
-            (artist.id ? albumsByArtistId.get(artist.id) : undefined) ??
-            albumsByArtistName.get(artist.name) ??
-            []
-        }))
-        .map((artist) => ({
-          ...artist,
-          albums: artist.albums.sort(
-            (a, b) => (a.year ?? Number.MAX_SAFE_INTEGER) - (b.year ?? Number.MAX_SAFE_INTEGER) ||
-              a.name.localeCompare(b.name)
-          )
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+      artists = freshArtists;
       connectedHost = server;
     } catch (caught) {
-      if (caught instanceof TypeError) {
-        error = 'Could not reach the server. Check the host and its CORS settings.';
+      const message = connectionError(caught);
+      if (hasCachedLibrary) {
+        refreshError = `Background refresh failed: ${message}`;
       } else {
-        error = caught instanceof Error ? caught.message : 'Could not load artists.';
+        error = message;
       }
     } finally {
       loading = false;
+      refreshing = false;
     }
   }
 </script>
@@ -453,8 +517,8 @@
       <input type="password" bind:value={password} autocomplete="current-password" required />
     </label>
 
-    <button type="submit" disabled={loading}>
-      {loading ? 'Loading…' : 'Load artists'}
+    <button type="submit" disabled={loading || refreshing}>
+      {loading ? 'Loading…' : refreshing ? 'Refreshing…' : 'Load artists'}
     </button>
 
     <small>Authentication is saved in this browser after a successful login.</small>
@@ -462,6 +526,12 @@
 
   {#if error}
     <p class="error" role="alert">{error}</p>
+  {/if}
+
+  {#if refreshError}
+    <p class="error">{refreshError} Cached metadata is still being shown.</p>
+  {:else if refreshing}
+    <p>Refreshing metadata in the background…</p>
   {/if}
 
   <section>
