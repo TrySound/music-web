@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
 
   const authStorageKey = 'navidrome-auth';
+  const volumeStorageKey = 'navidrome-volume';
 
   interface Track {
     discNumber?: number;
@@ -65,12 +66,24 @@
   let password = '';
   let artists: Artist[] = [];
   let queue: QueueItem[] = [];
+  let activeAuth: SavedAuth | null = null;
+  let currentIndex = -1;
+  let currentTime = 0;
+  let duration = 0;
+  let volume = 1;
+  let isPlaying = false;
+  let playbackError = '';
+  let audio: HTMLAudioElement;
   let loading = false;
   let error = '';
   let connectedHost = '';
 
   function normalizeHost(value: string) {
-    const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    const withProtocol = value.startsWith('/')
+      ? new URL(value, window.location.origin).toString()
+      : /^https?:\/\//i.test(value)
+        ? value
+        : `https://${value}`;
     const url = new URL(withProtocol);
     return url.toString().replace(/\/$/, '');
   }
@@ -90,6 +103,12 @@
   }
 
   onMount(() => {
+    const savedVolume = Number(localStorage.getItem(volumeStorageKey));
+    if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 1) {
+      volume = savedVolume;
+      audio.volume = volume;
+    }
+
     try {
       const value = localStorage.getItem(authStorageKey);
       if (!value) return;
@@ -100,6 +119,7 @@
         return;
       }
 
+      activeAuth = savedAuth;
       host = savedAuth.host;
       username = savedAuth.username;
       void loadArtists(savedAuth);
@@ -126,7 +146,7 @@
   }
 
   function playAlbum(artist: Artist, album: Album) {
-    queue = albumQueueItems(artist, album);
+    replaceQueueAndPlay(albumQueueItems(artist, album));
   }
 
   function addAlbumToQueue(artist: Artist, album: Album) {
@@ -134,7 +154,7 @@
   }
 
   function playArtist(artist: Artist) {
-    queue = artistQueueItems(artist);
+    replaceQueueAndPlay(artistQueueItems(artist));
   }
 
   function addArtistToQueue(artist: Artist) {
@@ -142,11 +162,115 @@
   }
 
   function playTrack(artist: Artist, album: Album, track: Track) {
-    queue = [trackQueueItem(artist, album, track)];
+    replaceQueueAndPlay([trackQueueItem(artist, album, track)]);
   }
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
     queue = [...queue, trackQueueItem(artist, album, track)];
+  }
+
+  function streamUrl(track: QueueItem) {
+    if (!activeAuth) return '';
+
+    const query = new URLSearchParams({
+      id: track.id,
+      u: activeAuth.username,
+      t: activeAuth.token,
+      s: activeAuth.salt,
+      v: '1.16.1',
+      c: 'navidrome-artists'
+    });
+    return `${activeAuth.host}/rest/stream.view?${query}`;
+  }
+
+  function replaceQueueAndPlay(items: QueueItem[]) {
+    queue = items;
+    currentIndex = items.length > 0 ? 0 : -1;
+    if (currentIndex >= 0) void playCurrent();
+    else stopPlayback();
+  }
+
+  async function playCurrent() {
+    const track = queue[currentIndex];
+    const source = track ? streamUrl(track) : '';
+    if (!source) return;
+
+    playbackError = '';
+    currentTime = 0;
+    duration = 0;
+    audio.src = source;
+
+    try {
+      await audio.play();
+    } catch (caught) {
+      playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
+    }
+  }
+
+  function stopPlayback() {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    currentIndex = -1;
+    currentTime = 0;
+    duration = 0;
+    isPlaying = false;
+  }
+
+  function clearQueue() {
+    stopPlayback();
+    queue = [];
+  }
+
+  function togglePlayback() {
+    if (audio.paused) {
+      if (currentIndex < 0 && queue.length > 0) {
+        currentIndex = 0;
+        void playCurrent();
+      } else {
+        void audio.play().catch((caught: unknown) => {
+          playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
+        });
+      }
+    } else {
+      audio.pause();
+    }
+  }
+
+  function nextTrack() {
+    if (currentIndex + 1 >= queue.length) {
+      audio.pause();
+      isPlaying = false;
+      return;
+    }
+    currentIndex += 1;
+    void playCurrent();
+  }
+
+  function previousTrack() {
+    if (audio.currentTime > 3 || currentIndex <= 0) {
+      audio.currentTime = 0;
+      return;
+    }
+    currentIndex -= 1;
+    void playCurrent();
+  }
+
+  function seek(value: number) {
+    if (Number.isFinite(value)) audio.currentTime = value;
+  }
+
+  function setVolume(value: number) {
+    volume = value;
+    audio.volume = value;
+    localStorage.setItem(volumeStorageKey, String(value));
+  }
+
+  function formatTime(value: number) {
+    if (!Number.isFinite(value)) return '0:00';
+    const minutes = Math.floor(value / 60);
+    const seconds = Math.floor(value % 60);
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
   }
 
   async function loadAlbums(server: string, authQuery: URLSearchParams) {
@@ -250,10 +374,8 @@
         throw new Error(result.error?.message || 'Navidrome rejected the request.');
       }
 
-      localStorage.setItem(
-        authStorageKey,
-        JSON.stringify({ host: server, username: requestUsername, token, salt } satisfies SavedAuth)
-      );
+      activeAuth = { host: server, username: requestUsername, token, salt };
+      localStorage.setItem(authStorageKey, JSON.stringify(activeAuth));
 
       const apiAlbums = await loadAlbums(server, query);
       const tracksByAlbumId = await loadTracks(server, query, apiAlbums);
@@ -315,7 +437,7 @@
       <input
         type="text"
         bind:value={host}
-        placeholder="https://music.example.com"
+        placeholder="https://music.example.com or /navidrome"
         autocomplete="url"
         required
       />
@@ -343,12 +465,78 @@
   {/if}
 
   <section>
+    <h2>Player</h2>
+    <audio
+      bind:this={audio}
+      preload="metadata"
+      onplay={() => isPlaying = true}
+      onpause={() => isPlaying = false}
+      onended={nextTrack}
+      ontimeupdate={() => currentTime = audio.currentTime}
+      onloadedmetadata={() => duration = audio.duration}
+      onerror={() => {
+        if (audio.currentSrc) playbackError = 'The track could not be played.';
+      }}
+    ></audio>
+
+    {#if currentIndex >= 0 && queue[currentIndex]}
+      <p>
+        <strong>{queue[currentIndex].title}</strong><br />
+        {queue[currentIndex].artist} — {queue[currentIndex].album}
+      </p>
+    {:else}
+      <p>Nothing is playing.</p>
+    {/if}
+
+    <div class="controls">
+      <button type="button" onclick={previousTrack} disabled={currentIndex <= 0}>Previous</button>
+      <button type="button" onclick={togglePlayback} disabled={queue.length === 0}>
+        {isPlaying ? 'Pause' : 'Play'}
+      </button>
+      <button
+        type="button"
+        onclick={nextTrack}
+        disabled={currentIndex < 0 || currentIndex + 1 >= queue.length}>Next</button
+      >
+    </div>
+
+    <label>
+      Position: {formatTime(currentTime)} / {formatTime(duration)}
+      <input
+        type="range"
+        min="0"
+        max={Number.isFinite(duration) ? duration : 0}
+        step="0.1"
+        value={currentTime}
+        disabled={!duration}
+        oninput={(event) => seek(event.currentTarget.valueAsNumber)}
+      />
+    </label>
+
+    <label>
+      Volume: {Math.round(volume * 100)}%
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value={volume}
+        oninput={(event) => setVolume(event.currentTarget.valueAsNumber)}
+      />
+    </label>
+
+    {#if playbackError}
+      <p class="error">{playbackError}</p>
+    {/if}
+  </section>
+
+  <section>
     <h2>Queue</h2>
     {#if queue.length > 0}
-      <button type="button" onclick={() => queue = []}>Clear queue</button>
+      <button type="button" onclick={clearQueue}>Clear queue</button>
       <ol>
-        {#each queue as item}
-          <li>{item.title} — {item.artist}, {item.album}</li>
+        {#each queue as item, index}
+          <li><strong>{index === currentIndex ? '▶ ' : ''}</strong>{item.title} — {item.artist}, {item.album}</li>
         {/each}
       </ol>
     {:else}
@@ -477,7 +665,17 @@
   }
 
   button:disabled {
-    cursor: wait;
+    cursor: default;
+  }
+
+  .controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  section > label {
+    margin: 0.75rem 0;
   }
 
   .error {
