@@ -4,9 +4,9 @@
   import { loadLibraryCache, saveLibraryCache } from './library-cache';
 
   const authStorageKey = 'navidrome-auth';
-  const volumeStorageKey = 'navidrome-volume';
 
   interface Track {
+    coverArt?: string;
     discNumber?: number;
     id: string;
     title: string;
@@ -16,6 +16,7 @@
   interface QueueItem {
     album: string;
     artist: string;
+    coverArt?: string;
     id: string;
     title: string;
   }
@@ -79,7 +80,6 @@
   let currentIndex = -1;
   let currentTime = 0;
   let duration = 0;
-  let volume = 1;
   let isPlaying = false;
   let playbackError = '';
   let audio: HTMLAudioElement;
@@ -109,7 +109,9 @@
     );
   }
 
-  function applyRoute(destination: string) {
+  function applyRoute(destination: string, resetScroll = false) {
+    if (resetScroll) window.scrollTo({ top: 0, behavior: 'instant' });
+
     const url = new URL(destination);
     const parts = url.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
 
@@ -148,7 +150,7 @@
       const destination = new URL(event.destination.url);
       if (!event.canIntercept || destination.origin !== window.location.origin || !destination.hash.startsWith('#/')) return;
 
-      event.intercept({ handler: () => applyRoute(destination.toString()) });
+      event.intercept({ handler: () => applyRoute(destination.toString(), true) });
     };
 
     window.navigation.addEventListener('navigate', handleNavigation);
@@ -159,12 +161,6 @@
   });
 
   onMount(() => {
-    const savedVolume = Number(localStorage.getItem(volumeStorageKey));
-    if (Number.isFinite(savedVolume) && savedVolume >= 0 && savedVolume <= 1) {
-      volume = savedVolume;
-      audio.volume = volume;
-    }
-
     try {
       const value = localStorage.getItem(authStorageKey);
       if (!value) {
@@ -219,6 +215,7 @@
     return album.tracks.map((track) => ({
       album: album.name,
       artist: artist.name,
+      coverArt: track.coverArt ?? album.coverArt ?? artistCoverArt(artist),
       id: track.id,
       title: track.title
     }));
@@ -229,7 +226,13 @@
   }
 
   function trackQueueItem(artist: Artist, album: Album, track: Track): QueueItem {
-    return { album: album.name, artist: artist.name, id: track.id, title: track.title };
+    return {
+      album: album.name,
+      artist: artist.name,
+      coverArt: track.coverArt ?? album.coverArt ?? artistCoverArt(artist),
+      id: track.id,
+      title: track.title
+    };
   }
 
   function playAlbum(artist: Artist, album: Album) {
@@ -348,10 +351,9 @@
     if (Number.isFinite(value)) audio.currentTime = value;
   }
 
-  function setVolume(value: number) {
-    volume = value;
-    audio.volume = value;
-    localStorage.setItem(volumeStorageKey, String(value));
+  function playbackPercent() {
+    if (!Number.isFinite(duration) || duration <= 0) return 0;
+    return Math.min(100, Math.max(0, (currentTime / duration) * 100));
   }
 
   function formatTime(value: number) {
@@ -627,7 +629,14 @@
   {/if}
 
   <section class="view player-view" class:hidden={activeView !== 'player'}>
-    <div class="artwork">♫</div>
+    <div class="player-main">
+      <div class="artwork">
+      {#if currentIndex >= 0 && queue[currentIndex] && coverArtUrl(queue[currentIndex].coverArt)}
+        <img src={coverArtUrl(queue[currentIndex].coverArt)} alt="" />
+      {:else}
+        <span>♫</span>
+      {/if}
+    </div>
     <audio
       bind:this={audio}
       preload="metadata"
@@ -648,21 +657,9 @@
       </p>
     {/if}
 
-    <div class="controls">
-      <button type="button" onclick={previousTrack} disabled={currentIndex <= 0}>Previous</button>
-      <button type="button" onclick={togglePlayback} disabled={queue.length === 0}>
-        {isPlaying ? 'Pause' : 'Play'}
-      </button>
-      <button
-        type="button"
-        onclick={nextTrack}
-        disabled={currentIndex < 0 || currentIndex + 1 >= queue.length}>Next</button
-      >
-    </div>
-
-    <label>
-      Position: {formatTime(currentTime)} / {formatTime(duration)}
+    <div class="playback-progress">
       <input
+        class="playback-slider"
         type="range"
         min="0"
         max={Number.isFinite(duration) ? duration : 0}
@@ -671,23 +668,24 @@
         disabled={!duration}
         oninput={(event) => seek(event.currentTarget.valueAsNumber)}
       />
-    </label>
+      <div class="playback-time">
+        <span>{formatTime(currentTime)}</span>
+        <span>{formatTime(duration)}</span>
+      </div>
+    </div>
 
-    <label>
-      Volume: {Math.round(volume * 100)}%
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={volume}
-        oninput={(event) => setVolume(event.currentTarget.valueAsNumber)}
-      />
-    </label>
+    <div class="controls">
+      <button type="button" onclick={previousTrack} disabled={currentIndex <= 0} title="Previous">⏮</button>
+      <button type="button" class="play-control" onclick={togglePlayback} disabled={queue.length === 0} title={isPlaying ? 'Pause' : 'Play'}>
+        {isPlaying ? 'Ⅱ' : '▶'}
+      </button>
+      <button type="button" onclick={nextTrack} disabled={currentIndex < 0 || currentIndex + 1 >= queue.length} title="Next">⏭</button>
+    </div>
 
-    {#if playbackError}
-      <p class="error">{playbackError}</p>
-    {/if}
+      {#if playbackError}
+        <p class="error">{playbackError}</p>
+      {/if}
+    </div>
 
     <div class="player-queue">
       <div class="section-heading">
@@ -807,7 +805,13 @@
 
   {#if queue.length > 0 && activeView !== 'player'}
     <a class="mini-player" href="#/player">
-      <span class="mini-art">♫</span>
+      <span class="mini-art">
+        {#if coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
+          <img src={coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)} alt="" />
+        {:else}
+          <span>♫</span>
+        {/if}
+      </span>
       <span class="mini-copy">
         <strong>{queue[currentIndex >= 0 ? currentIndex : 0].title}</strong>
         <small>{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small>
@@ -825,6 +829,7 @@
           if (event.key === 'Enter' || event.key === ' ') togglePlayback();
         }}>{isPlaying ? 'Ⅱ' : '▶'}</span
       >
+      <span class="mini-progress"><span style:width={`${playbackPercent()}%`}></span></span>
     </a>
   {/if}
 
@@ -912,11 +917,6 @@
     border-color: #8d7dff;
   }
 
-  input[type='range'] {
-    width: 100%;
-    accent-color: #8d7dff;
-  }
-
   a {
     color: inherit;
     text-decoration: none;
@@ -970,11 +970,21 @@
     background: #252438;
   }
 
+  .player-main {
+    display: flex;
+    height: calc(100dvh - 6.75rem);
+    min-height: 0;
+    flex-direction: column;
+    justify-content: center;
+  }
+
   .artwork {
     display: grid;
-    width: min(76vw, 21rem);
-    aspect-ratio: 1;
-    margin: 1rem auto 2rem;
+    width: 100%;
+    min-height: 0;
+    margin: 0 0 1.5rem;
+    overflow: hidden;
+    flex: 1 1 auto;
     place-items: center;
     border-radius: 1.5rem;
     color: rgb(255 255 255 / 85%);
@@ -983,38 +993,64 @@
     font-size: 5rem;
   }
 
-  .player-view > p {
+  .artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .player-main > p {
+    flex: none;
     margin-bottom: 1.4rem;
     text-align: center;
   }
 
-  .player-view > p strong {
+  .player-main > p strong {
     font-size: 1.25rem;
   }
 
-  .player-view label {
-    margin-top: 1.25rem;
-    color: #b8bec9;
-    font-size: 0.78rem;
+  .playback-progress {
+    flex: none;
+    margin: 1.5rem 0 1.25rem;
+  }
+
+  .playback-slider {
+    width: 100%;
+    margin: 0;
+    accent-color: #8d7dff;
+  }
+
+  .playback-time {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.45rem;
+    color: #8f96a5;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .controls {
     display: flex;
+    flex: none;
     align-items: center;
     justify-content: center;
     gap: 0.75rem;
   }
 
   .controls button {
-    min-width: 4.7rem;
-    min-height: 2.8rem;
-    padding: 0.6rem;
+    display: grid;
+    width: 3.2rem;
+    height: 3.2rem;
+    padding: 0;
+    place-items: center;
+    font-size: 1.25rem;
   }
 
-  .controls button:nth-child(2) {
-    min-width: 4.2rem;
-    min-height: 4.2rem;
+  .controls .play-control {
+    width: 4.2rem;
+    height: 4.2rem;
     background: #7565f6;
+    font-size: 1.45rem;
   }
 
   .back-button {
@@ -1186,7 +1222,7 @@
   }
 
   .player-queue {
-    margin-top: 2rem;
+    margin-top: 5.5rem;
     padding-top: 1.25rem;
     border-top: 1px solid #272c38;
   }
@@ -1253,10 +1289,34 @@
     display: grid;
     width: 3rem;
     height: 3rem;
+    overflow: hidden;
     flex: none;
     place-items: center;
     border-radius: 0.65rem;
     background: linear-gradient(145deg, #7665f6, #d35b91);
+  }
+
+  .mini-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .mini-progress {
+    position: absolute;
+    right: 0.5rem;
+    bottom: 0;
+    left: 0.5rem;
+    overflow: hidden;
+    height: 0.18rem;
+    border-radius: 999px;
+    background: #343a48;
+  }
+
+  .mini-progress span {
+    display: block;
+    height: 100%;
+    background: #8d7dff;
   }
 
   .mini-copy {
