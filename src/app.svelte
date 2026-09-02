@@ -1,6 +1,7 @@
 <script lang="ts">
   import { md5 } from 'js-md5';
   import { onMount } from 'svelte';
+  import { cacheImage, getCachedImage } from './image-cache';
   import { loadLibraryCache, saveLibraryCache } from './library-cache';
   import { cacheTrack, getCachedTrack } from './track-cache';
 
@@ -114,6 +115,7 @@
   let downloadingCollection = '';
   let offlineMode = false;
   let offlineScanning = false;
+  let coverArtObjectUrls = new Map<string, string>();
   let loading = false;
   let refreshing = false;
   let refreshError = '';
@@ -271,8 +273,58 @@
     return `${activeAuth.host}/rest/getCoverArt.view?${query}`;
   }
 
+  function coverArtCacheKey(id: string) {
+    if (!activeAuth) return id;
+    return `${activeAuth.host}\n${activeAuth.username}\n${id}`;
+  }
+
+  function coverArtSource(id?: string) {
+    if (!id) return '';
+    return coverArtObjectUrls.get(id) ?? (offlineMode ? '' : coverArtUrl(id));
+  }
+
+  function installCachedCoverArt(id: string, file: File, type: string) {
+    if (coverArtObjectUrls.has(id)) return;
+
+    const url = URL.createObjectURL(new Blob([file], { type }));
+    coverArtObjectUrls = new Map(coverArtObjectUrls).set(id, url);
+  }
+
+  async function ensureCoverArtCached(id?: string) {
+    if (!id || !activeAuth || coverArtObjectUrls.has(id)) return;
+
+    const cached = await cacheImage(coverArtCacheKey(id), coverArtUrl(id));
+    installCachedCoverArt(id, cached.file, cached.type);
+  }
+
+  async function loadCachedCoverArt(id?: string) {
+    if (!id || !activeAuth || coverArtObjectUrls.has(id)) return;
+
+    const cached = await getCachedImage(coverArtCacheKey(id));
+    if (cached) installCachedCoverArt(id, cached.file, cached.type);
+  }
+
+  function clearCoverArtObjectUrls() {
+    for (const url of coverArtObjectUrls.values()) URL.revokeObjectURL(url);
+    coverArtObjectUrls = new Map();
+  }
+
   function artistCoverArt(artist: Artist) {
     return artist.coverArt ?? artist.albums.find((album) => album.coverArt)?.coverArt;
+  }
+
+  function displayedArtistCoverArt(artist: Artist) {
+    if (!offlineMode) return artistCoverArt(artist);
+    return [
+      artist.coverArt,
+      ...artist.albums.flatMap((album) => [album.coverArt, ...album.tracks.map((track) => track.coverArt)])
+    ].find((id) => id && coverArtObjectUrls.has(id));
+  }
+
+  function displayedAlbumCoverArt(album: Album) {
+    if (!offlineMode) return album.coverArt;
+    return [album.coverArt, ...album.tracks.map((track) => track.coverArt)]
+      .find((id) => id && coverArtObjectUrls.has(id));
   }
 
   function directGenres(item: { genre?: string; genres?: { name: string }[] }) {
@@ -399,7 +451,11 @@
     downloadingTrackIds = updateTrackSet(downloadingTrackIds, track.id, true);
     try {
       const key = trackCacheKey(track);
-      const file = (await getCachedTrack(key)) ?? (await cacheTrack(key, source));
+      const trackFile = getCachedTrack(key).then((cached) => cached ?? cacheTrack(key, source));
+      const [file] = await Promise.all([
+        trackFile,
+        ensureCoverArtCached(track.coverArt).catch(() => {})
+      ]);
       downloadedTrackIds = updateTrackSet(downloadedTrackIds, track.id, true);
       return file;
     } finally {
@@ -483,10 +539,22 @@
       const cacheKey = `${activeAuth.host}\n${activeAuth.username}`;
       if (downloadedCacheKey !== cacheKey) {
         downloadedTrackIds = new Set();
+        clearCoverArtObjectUrls();
         downloadedCacheKey = cacheKey;
       }
 
-      await refreshDownloadedState(artists.flatMap(artistQueueItems));
+      const libraryTracks = artists.flatMap(artistQueueItems);
+      await refreshDownloadedState(libraryTracks);
+
+      const coverArtIds = [
+        ...new Set(
+          libraryTracks
+            .filter((track) => downloadedTrackIds.has(track.id))
+            .map((track) => track.coverArt)
+            .filter((id): id is string => Boolean(id))
+        )
+      ];
+      await Promise.all(coverArtIds.map(loadCachedCoverArt));
 
       const currentTrackId = queue[currentIndex]?.id;
       const offlineQueue = queue.filter((track) => downloadedTrackIds.has(track.id));
@@ -931,6 +999,7 @@
 
       if (loadedQueueKey !== cacheKey) {
         downloadedTrackIds = new Set();
+        clearCoverArtObjectUrls();
         downloadedCacheKey = cacheKey;
         try {
           await loadServerQueue(server, query);
@@ -1116,8 +1185,8 @@
   <section class="view player-view" class:hidden={activeView !== 'player'}>
     <div class="player-main">
       <div class="artwork">
-      {#if !offlineMode && currentIndex >= 0 && queue[currentIndex] && coverArtUrl(queue[currentIndex].coverArt)}
-        <img src={coverArtUrl(queue[currentIndex].coverArt)} alt="" />
+      {#if currentIndex >= 0 && queue[currentIndex] && coverArtSource(queue[currentIndex].coverArt)}
+        <img src={coverArtSource(queue[currentIndex].coverArt)} alt="" />
       {:else}
         <span>♫</span>
       {/if}
@@ -1331,8 +1400,8 @@
             <article class="album-row">
               <a class="album-main" href={albumRoute(selectedArtist, album)}>
                 <span class="cover album-cover">
-                  {#if !offlineMode && coverArtUrl(album.coverArt)}
-                    <img src={coverArtUrl(album.coverArt)} alt="" loading="lazy" />
+                  {#if coverArtSource(displayedAlbumCoverArt(album))}
+                    <img src={coverArtSource(displayedAlbumCoverArt(album))} alt="" loading="lazy" />
                   {:else}
                     <span>♫</span>
                   {/if}
@@ -1363,8 +1432,8 @@
             <article class="artist-card">
               <a class="artist-main" href={artistRoute(artist)}>
                 <span class="cover artist-cover">
-                  {#if !offlineMode && coverArtUrl(artistCoverArt(artist))}
-                    <img src={coverArtUrl(artistCoverArt(artist))} alt="" loading="lazy" />
+                  {#if coverArtSource(displayedArtistCoverArt(artist))}
+                    <img src={coverArtSource(displayedArtistCoverArt(artist))} alt="" loading="lazy" />
                   {:else}
                     <span>♫</span>
                   {/if}
@@ -1402,8 +1471,8 @@
   {#if queue.length > 0 && activeView !== 'player'}
     <a class="mini-player" href="#/player">
       <span class="mini-art">
-        {#if !offlineMode && coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
-          <img src={coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)} alt="" />
+        {#if coverArtSource(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
+          <img src={coverArtSource(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)} alt="" />
         {:else}
           <span>♫</span>
         {/if}
