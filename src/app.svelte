@@ -73,6 +73,7 @@
   }
 
   type View = 'library' | 'player' | 'settings';
+  type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
   let activeView: View = 'library';
   let selectedArtist: Artist | null = null;
@@ -94,6 +95,7 @@
   let refreshError = '';
   let error = '';
   let connectedHost = '';
+  let connectionStatus: ConnectionStatus = 'disconnected';
 
   function normalizeHost(value: string) {
     const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
@@ -525,6 +527,13 @@
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  function connectionStatusLabel() {
+    if (connectionStatus === 'connected') return 'Connected';
+    if (connectionStatus === 'connecting') return 'Checking…';
+    if (connectionStatus === 'error') return 'Connection failed';
+    return 'Disconnected';
+  }
+
   function connectionError(caught: unknown) {
     if (caught instanceof TypeError) {
       return 'Could not reach the server. Check the host and its CORS settings.';
@@ -538,8 +547,9 @@
     if (!error) navigateTo('#/library');
   }
 
-  async function loadArtists(savedAuth?: SavedAuth) {
+  async function loadArtists(savedAuth?: SavedAuth, forceRefresh = false) {
     loading = true;
+    connectionStatus = 'connecting';
     refreshing = false;
     error = '';
     refreshError = '';
@@ -575,11 +585,12 @@
         connectedHost = '';
       }
 
-      activeAuth = credentials;
       const lastModified = await getLastModified(server, query, cached?.lastModified);
+      activeAuth = credentials;
+      connectionStatus = 'connected';
       localStorage.setItem(authStorageKey, JSON.stringify(credentials));
 
-      if (cached && lastModified === cached.lastModified) return;
+      if (!forceRefresh && cached && lastModified === cached.lastModified) return;
 
       refreshing = hasCachedLibrary;
       const freshArtists = await fetchLibrary(server, query);
@@ -593,6 +604,7 @@
       connectedHost = server;
       syncCurrentRoute();
     } catch (caught) {
+      connectionStatus = 'error';
       const message = connectionError(caught);
       if (hasCachedLibrary) {
         refreshError = `Background refresh failed: ${message}`;
@@ -612,36 +624,78 @@
 
 <main class="app-shell">
   <section class="view settings-view" class:hidden={activeView !== 'settings'}>
-    <h2>Connect to your music</h2>
-    <p class="muted">Enter your Navidrome server details. Authentication stays on this device.</p>
-    <form onsubmit={submitConnection}>
-    <label>
-      Host
-      <input
-        type="text"
-        bind:value={host}
-        placeholder="https://music.example.com"
-        autocomplete="url"
-        required
-      />
-    </label>
+    <span class="eyebrow">Settings</span>
+    <h2>{activeAuth ? 'Music server' : 'Connect to your music'}</h2>
+    <p class="muted">
+      {activeAuth
+        ? 'Manage the server used for your library.'
+        : 'Enter your Navidrome server details. Authentication stays on this device.'}
+    </p>
 
-    <label>
-      Username
-      <input type="text" bind:value={username} autocomplete="username" required />
-    </label>
+    <details class="connection-card" open={!activeAuth}>
+      <summary>
+        <span
+          class="connection-dot"
+          class:connected={connectionStatus === 'connected'}
+          class:connecting={connectionStatus === 'connecting'}
+          class:failed={connectionStatus === 'error'}
+        ></span>
+        <span class="connection-summary">
+          <strong>{activeAuth?.host ?? 'Add a server'}</strong>
+          <small>
+            {activeAuth ? `${activeAuth.username} · ${connectionStatusLabel()}` : 'Navidrome connection'}
+          </small>
+        </span>
+        <span class="connection-chevron">⌄</span>
+      </summary>
 
-    <label>
-      Password
-      <input type="password" bind:value={password} autocomplete="current-password" required />
-    </label>
+      <div class="connection-details">
+        {#if activeAuth}
+          <div class="connection-status">
+            <span>Status</span>
+            <strong>{connectionStatusLabel()}</strong>
+          </div>
+          <button
+            type="button"
+            class="refresh-data"
+            disabled={loading || refreshing}
+            onclick={() => loadArtists(activeAuth!, true)}
+          >
+            {loading || refreshing ? 'Refreshing…' : 'Refresh library data'}
+          </button>
+          <h3>Edit connection</h3>
+        {/if}
 
-    <button type="submit" disabled={loading || refreshing}>
-      {loading ? 'Loading…' : refreshing ? 'Refreshing…' : 'Load artists'}
-    </button>
+        <form onsubmit={submitConnection}>
+          <label>
+            Host
+            <input
+              type="text"
+              bind:value={host}
+              placeholder="https://music.example.com"
+              autocomplete="url"
+              required
+            />
+          </label>
 
-      <small>Authentication is saved in this browser after a successful login.</small>
-    </form>
+          <label>
+            Username
+            <input type="text" bind:value={username} autocomplete="username" required />
+          </label>
+
+          <label>
+            Password
+            <input type="password" bind:value={password} autocomplete="current-password" required />
+          </label>
+
+          <button type="submit" disabled={loading || refreshing}>
+            {loading ? 'Connecting…' : activeAuth ? 'Save connection' : 'Connect'}
+          </button>
+
+          <small>Authentication is saved in this browser after a successful login.</small>
+        </form>
+      </div>
+    </details>
   </section>
 
   {#if error}
@@ -958,6 +1012,106 @@
 
   input:not([type='range']):focus {
     border-color: #8d7dff;
+  }
+
+  .connection-card {
+    margin-top: 1.5rem;
+    overflow: hidden;
+    border: 1px solid #2c3240;
+    border-radius: 0.9rem;
+    background: #171b23;
+  }
+
+  .connection-card summary {
+    display: flex;
+    min-height: 4.5rem;
+    padding: 0.85rem;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .connection-card summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .connection-dot {
+    width: 0.7rem;
+    height: 0.7rem;
+    flex: none;
+    border-radius: 50%;
+    background: #5d6472;
+  }
+
+  .connection-dot.connected {
+    background: #53d58b;
+    box-shadow: 0 0 0.7rem rgb(83 213 139 / 45%);
+  }
+
+  .connection-dot.connecting {
+    background: #e8b44d;
+  }
+
+  .connection-dot.failed {
+    background: #ff667d;
+  }
+
+  .connection-summary {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .connection-summary strong,
+  .connection-summary small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connection-chevron {
+    color: #979ead;
+    font-size: 1.2rem;
+    transition: transform 160ms ease;
+  }
+
+  .connection-card[open] .connection-chevron {
+    transform: rotate(180deg);
+  }
+
+  .connection-details {
+    padding: 1rem;
+    border-top: 1px solid #2c3240;
+  }
+
+  .connection-details form {
+    margin-top: 1rem;
+  }
+
+  .connection-details h3 {
+    margin: 1.5rem 0 0;
+    font-size: 1rem;
+  }
+
+  .connection-status {
+    display: flex;
+    margin-bottom: 0.8rem;
+    justify-content: space-between;
+    color: #979ead;
+    font-size: 0.8rem;
+  }
+
+  .connection-status strong {
+    color: #f5f6f8;
+  }
+
+  .refresh-data {
+    width: 100%;
+    min-height: 2.7rem;
+    padding: 0.65rem 1rem;
+    color: #bcb4ff;
+    background: #252438;
   }
 
   a {
