@@ -6,6 +6,8 @@
   const authStorageKey = 'navidrome-auth';
 
   interface Track {
+    album?: string;
+    artist?: string;
     coverArt?: string;
     genre?: string;
     genres?: { name: string }[];
@@ -59,6 +61,11 @@
     albumList2?: { album?: ApiAlbum[] };
     album?: { song?: Track[] };
     indexes?: { lastModified?: number | string };
+    playQueue?: {
+      current?: string;
+      entry?: Track[];
+      position?: number;
+    };
   }
 
   interface SubsonicEnvelope {
@@ -90,6 +97,10 @@
   let isPlaying = false;
   let playbackError = '';
   let audio: HTMLAudioElement;
+  let pendingSeek = 0;
+  let loadedQueueKey = '';
+  let queueSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastPositionSync = 0;
   let loading = false;
   let refreshing = false;
   let refreshError = '';
@@ -192,6 +203,15 @@
     }
   });
 
+  onMount(() => {
+    const saveWhenHidden = () => {
+      if (document.visibilityState === 'hidden') void saveServerQueue();
+    };
+
+    document.addEventListener('visibilitychange', saveWhenHidden);
+    return () => document.removeEventListener('visibilitychange', saveWhenHidden);
+  });
+
   function artistRoute(artist: Artist) {
     return `#/library/artist/${encodeURIComponent(artist.id ?? artist.name)}`;
   }
@@ -267,6 +287,7 @@
 
   function addAlbumToQueue(artist: Artist, album: Album) {
     queue = [...queue, ...albumQueueItems(artist, album)];
+    scheduleQueueSave();
   }
 
   function playArtist(artist: Artist) {
@@ -279,6 +300,7 @@
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
     queue = [...queue, trackQueueItem(artist, album, track)];
+    scheduleQueueSave();
   }
 
   function streamUrl(track: QueueItem) {
@@ -295,9 +317,90 @@
     return `${activeAuth.host}/rest/stream.view?${query}`;
   }
 
+  async function loadServerQueue(server: string, authQuery: URLSearchParams) {
+    const response = await fetch(`${server}/rest/getPlayQueue.view?${authQuery}`);
+    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+
+    const body: SubsonicEnvelope = await response.json();
+    const result = body['subsonic-response'];
+    if (!result) throw new Error('The server returned an unexpected response.');
+    if (result.status !== 'ok') {
+      throw new Error(result.error?.message || 'Navidrome rejected the request.');
+    }
+
+    const playQueue = result.playQueue;
+    queue = (playQueue?.entry ?? []).map((track) => ({
+      album: track.album ?? 'Unknown album',
+      artist: track.artist ?? 'Unknown artist',
+      coverArt: track.coverArt,
+      id: track.id,
+      title: track.title
+    }));
+    currentIndex = playQueue?.current
+      ? queue.findIndex((track) => track.id === playQueue.current)
+      : -1;
+
+    if (currentIndex >= 0) {
+      const source = streamUrl(queue[currentIndex]);
+      if (source) {
+        pendingSeek = (playQueue?.position ?? 0) / 1000;
+        audio.src = source;
+        audio.load();
+      }
+    }
+  }
+
+  async function saveServerQueue() {
+    if (!activeAuth) return;
+
+    const query = new URLSearchParams({
+      u: activeAuth.username,
+      t: activeAuth.token,
+      s: activeAuth.salt,
+      v: '1.16.1',
+      c: 'navidrome-artists',
+      f: 'json'
+    });
+    for (const track of queue) query.append('id', track.id);
+
+    if (currentIndex >= 0 && queue[currentIndex]) {
+      query.set('current', queue[currentIndex].id);
+      query.set('position', String(Math.round(audio.currentTime * 1000)));
+    }
+
+    try {
+      const response = await fetch(`${activeAuth.host}/rest/savePlayQueue.view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: query,
+        keepalive: true
+      });
+      if (!response.ok) throw new Error();
+
+      const body: SubsonicEnvelope = await response.json();
+      if (body['subsonic-response']?.status !== 'ok') throw new Error();
+    } catch {
+      playbackError = 'The queue could not be synchronized with Navidrome.';
+    }
+  }
+
+  function scheduleQueueSave() {
+    clearTimeout(queueSaveTimer);
+    queueSaveTimer = setTimeout(() => void saveServerQueue(), 300);
+  }
+
+  function updatePlaybackTime() {
+    currentTime = audio.currentTime;
+    if (Date.now() - lastPositionSync >= 10_000) {
+      lastPositionSync = Date.now();
+      void saveServerQueue();
+    }
+  }
+
   function replaceQueueAndPlay(items: QueueItem[]) {
     queue = items;
     currentIndex = items.length > 0 ? 0 : -1;
+    scheduleQueueSave();
     if (currentIndex >= 0) void playCurrent();
     else stopPlayback();
   }
@@ -311,6 +414,7 @@
     currentTime = 0;
     duration = 0;
     audio.src = source;
+    scheduleQueueSave();
 
     try {
       await audio.play();
@@ -332,6 +436,7 @@
   function clearQueue() {
     stopPlayback();
     queue = [];
+    scheduleQueueSave();
   }
 
   function togglePlayback() {
@@ -346,6 +451,7 @@
       }
     } else {
       audio.pause();
+      void saveServerQueue();
     }
   }
 
@@ -358,6 +464,7 @@
     if (currentIndex + 1 >= queue.length) {
       audio.pause();
       isPlaying = false;
+      void saveServerQueue();
       return;
     }
     currentIndex += 1;
@@ -367,6 +474,7 @@
   function previousTrack() {
     if (audio.currentTime > 3 || currentIndex <= 0) {
       audio.currentTime = 0;
+      scheduleQueueSave();
       return;
     }
     currentIndex -= 1;
@@ -374,7 +482,10 @@
   }
 
   function seek(value: number) {
-    if (Number.isFinite(value)) audio.currentTime = value;
+    if (Number.isFinite(value)) {
+      audio.currentTime = value;
+      scheduleQueueSave();
+    }
   }
 
   function playbackPercent() {
@@ -590,6 +701,15 @@
       connectionStatus = 'connected';
       localStorage.setItem(authStorageKey, JSON.stringify(credentials));
 
+      if (loadedQueueKey !== cacheKey) {
+        try {
+          await loadServerQueue(server, query);
+          loadedQueueKey = cacheKey;
+        } catch {
+          playbackError = 'The saved Navidrome queue could not be loaded.';
+        }
+      }
+
       if (!forceRefresh && cached && lastModified === cached.lastModified) return;
 
       refreshing = hasCachedLibrary;
@@ -721,8 +841,15 @@
       onplay={() => isPlaying = true}
       onpause={() => isPlaying = false}
       onended={nextTrack}
-      ontimeupdate={() => currentTime = audio.currentTime}
-      onloadedmetadata={() => duration = audio.duration}
+      ontimeupdate={updatePlaybackTime}
+      onloadedmetadata={() => {
+        duration = audio.duration;
+        if (pendingSeek > 0) {
+          audio.currentTime = Math.min(pendingSeek, duration || pendingSeek);
+          currentTime = audio.currentTime;
+          pendingSeek = 0;
+        }
+      }}
       onerror={() => {
         if (audio.currentSrc) playbackError = 'The track could not be played.';
       }}
