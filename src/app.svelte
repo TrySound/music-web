@@ -7,6 +7,8 @@
 
   interface Track {
     coverArt?: string;
+    genre?: string;
+    genres?: { name: string }[];
     discNumber?: number;
     id: string;
     title: string;
@@ -23,6 +25,8 @@
 
   interface Album {
     artist?: string;
+    genre?: string;
+    genres?: { name: string }[];
     artistId?: string;
     coverArt?: string;
     id: string;
@@ -35,6 +39,8 @@
 
   interface Artist {
     albums: Album[];
+    genre?: string;
+    genres?: { name: string }[];
     coverArt?: string;
     id?: string;
     name: string;
@@ -209,6 +215,24 @@
 
   function artistCoverArt(artist: Artist) {
     return artist.coverArt ?? artist.albums.find((album) => album.coverArt)?.coverArt;
+  }
+
+  function directGenres(item: { genre?: string; genres?: { name: string }[] }) {
+    const genres = [...(item.genres?.map((genre) => genre.name) ?? []), ...(item.genre ? [item.genre] : [])];
+    return genres.flatMap((genre) => genre.split('|')).map((genre) => genre.trim()).filter(Boolean);
+  }
+
+  function uniqueGenres(genres: string[]) {
+    return [...new Map(genres.map((genre) => [genre.toLocaleLowerCase(), genre])).values()]
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  function albumGenres(album: Album) {
+    return uniqueGenres([...directGenres(album), ...album.tracks.flatMap(directGenres)]);
+  }
+
+  function artistGenres(artist: Artist) {
+    return uniqueGenres([...directGenres(artist), ...artist.albums.flatMap(albumGenres)]);
   }
 
   function albumQueueItems(artist: Artist, album: Album): QueueItem[] {
@@ -727,6 +751,25 @@
             {selectedAlbum ? selectedArtist?.name : selectedArtist ? 'Albums' : 'Your music'}
           </span>
           <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${artists.length} artists`}</h2>
+          {#if selectedAlbum}
+            <p class="library-meta">
+              {selectedAlbum.year ?? 'Unknown year'} · {selectedAlbum.tracks.length} track{selectedAlbum.tracks.length === 1 ? '' : 's'}
+            </p>
+            {#if albumGenres(selectedAlbum).length > 0}
+              <div class="genre-list">
+                {#each albumGenres(selectedAlbum) as genre}<span>{genre}</span>{/each}
+              </div>
+            {/if}
+          {:else if selectedArtist}
+            <p class="library-meta">
+              {selectedArtist.albums.length} album{selectedArtist.albums.length === 1 ? '' : 's'}
+            </p>
+            {#if artistGenres(selectedArtist).length > 0}
+              <div class="genre-list">
+                {#each artistGenres(selectedArtist) as genre}<span>{genre}</span>{/each}
+              </div>
+            {/if}
+          {/if}
         </div>
       </div>
 
@@ -962,6 +1005,27 @@
 
   .section-heading h2 {
     margin: 0;
+  }
+
+  .library-meta {
+    margin: 0.3rem 0 0;
+    color: #979ead;
+    font-size: 0.78rem;
+  }
+
+  .genre-list {
+    display: flex;
+    margin-top: 0.65rem;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .genre-list span {
+    padding: 0.25rem 0.5rem;
+    border-radius: 999px;
+    color: #bcb4ff;
+    background: #252438;
+    font-size: 0.68rem;
   }
 
   .quiet {
