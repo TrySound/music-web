@@ -65,7 +65,7 @@
     salt: string;
   }
 
-  type View = 'library' | 'player' | 'queue' | 'settings';
+  type View = 'library' | 'player' | 'settings';
 
   let activeView: View = 'library';
   let selectedArtist: Artist | null = null;
@@ -117,8 +117,13 @@
     const url = new URL(destination);
     const parts = url.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
 
-    if (parts[0] === 'player' || parts[0] === 'queue' || parts[0] === 'settings') {
-      activeView = parts[0];
+    if (parts[0] === 'player' || parts[0] === 'queue') {
+      activeView = 'player';
+      return;
+    }
+
+    if (parts[0] === 'settings') {
+      activeView = 'settings';
       return;
     }
 
@@ -691,25 +696,33 @@
     {#if playbackError}
       <p class="error">{playbackError}</p>
     {/if}
-  </section>
 
-  <section class="view queue-view" class:hidden={activeView !== 'queue'}>
-    <div class="section-heading">
-      <div>
-        <span class="eyebrow">Up next</span>
-        <h2>{queue.length} track{queue.length === 1 ? '' : 's'}</h2>
+    <div class="player-queue">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">Up next</span>
+          <h2>{queue.length} track{queue.length === 1 ? '' : 's'}</h2>
+        </div>
+        {#if queue.length > 0}
+          <button type="button" class="quiet" onclick={clearQueue}>Clear</button>
+        {/if}
       </div>
+      {#if queue.length > 0}
+        <div class="track-list">
+          {#each queue as item, index}
+            <div class="track-row" class:current={index === currentIndex}>
+              <button type="button" class="track-main" onclick={() => playQueueIndex(index)}>
+                <span class="track-number">{index === currentIndex ? '▶' : index + 1}</span>
+                <span>{item.title}</span>
+              </button>
+              <button type="button" class="row-action" onclick={() => playQueueIndex(index)}>▶</button>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="muted">The queue is empty.</p>
+      {/if}
     </div>
-    {#if queue.length > 0}
-      <button type="button" onclick={clearQueue}>Clear queue</button>
-      <ol>
-        {#each queue as item, index}
-          <li><strong>{index === currentIndex ? '▶ ' : ''}</strong>{item.title} — {item.artist}, {item.album}</li>
-        {/each}
-      </ol>
-    {:else}
-      <p>The queue is empty.</p>
-    {/if}
   </section>
 
   <section class="view library-view" class:hidden={activeView !== 'library'}>
@@ -834,9 +847,6 @@
     </a>
     <a class:active={activeView === 'player'} href="#/player">
       <span>▶</span><small>Player</small>
-    </a>
-    <a class:active={activeView === 'queue'} href="#/queue">
-      <span>≡</span><small>Queue</small>
     </a>
     <a class:active={activeView === 'settings'} href="#/settings">
       <span>⚙</span><small>Settings</small>
@@ -1191,16 +1201,14 @@
     font-size: 1rem;
   }
 
-  .queue-view ol {
-    margin: 1rem 0 0;
-    padding: 0;
-    list-style: none;
+  .player-queue {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #272c38;
   }
 
-  .queue-view ol li {
-    padding: 0.85rem 0;
-    border-bottom: 1px solid #272c38;
-    color: #c9ced7;
+  .player-queue .track-row.current {
+    background: #19182a;
   }
 
   .empty-state {
@@ -1301,7 +1309,7 @@
     min-height: 4.25rem;
     margin: 0 auto;
     padding: 0.35rem 0.4rem max(0.35rem, env(safe-area-inset-bottom));
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     border-top: 1px solid #292f3b;
     background: rgb(17 20 27 / 97%);
     backdrop-filter: blur(14px);
