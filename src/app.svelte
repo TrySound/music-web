@@ -161,6 +161,14 @@
     void window.navigation.navigate(hash, { history }).finished?.catch(() => {});
   }
 
+  function goBack() {
+    if (window.navigation.canGoBack) {
+      void window.navigation.back().finished?.catch(() => {});
+    } else {
+      navigateTo('#/library', 'replace');
+    }
+  }
+
   function syncCurrentRoute() {
     applyRoute(window.navigation.currentEntry?.url ?? window.location.href);
   }
@@ -758,6 +766,8 @@
         href={selectedAlbum ? artistRoute(selectedArtist) : '#/library'}
         title="Back"
       >‹</a>
+    {:else if activeView === 'player'}
+      <button type="button" class="topbar-icon" onclick={goBack} title="Back">‹</button>
     {:else}
       <span class="topbar-spacer"></span>
     {/if}
