@@ -95,6 +95,7 @@
   let currentTime = 0;
   let duration = 0;
   let isPlaying = false;
+  let playbackLoading = false;
   let playbackError = '';
   let audio: HTMLAudioElement;
   let pendingSeek = 0;
@@ -308,7 +309,9 @@
   }
 
   function playTrack(artist: Artist, album: Album, track: Track) {
-    replaceQueueAndPlay([trackQueueItem(artist, album, track)]);
+    const albumTracks = albumQueueItems(artist, album);
+    const selectedIndex = albumTracks.findIndex((item) => item.id === track.id);
+    replaceQueueAndPlay(albumTracks, Math.max(0, selectedIndex));
   }
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
@@ -357,6 +360,7 @@
       const source = streamUrl(queue[currentIndex]);
       if (source) {
         pendingSeek = (playQueue?.position ?? 0) / 1000;
+        playbackLoading = true;
         audio.src = source;
         audio.load();
       }
@@ -410,9 +414,9 @@
     }
   }
 
-  function replaceQueueAndPlay(items: QueueItem[]) {
+  function replaceQueueAndPlay(items: QueueItem[], startIndex = 0) {
     queue = items;
-    currentIndex = items.length > 0 ? 0 : -1;
+    currentIndex = items.length > 0 ? Math.min(startIndex, items.length - 1) : -1;
     scheduleQueueSave();
     if (currentIndex >= 0) void playCurrent();
     else stopPlayback();
@@ -424,6 +428,7 @@
     if (!source) return;
 
     playbackError = '';
+    playbackLoading = true;
     currentTime = 0;
     duration = 0;
     audio.src = source;
@@ -432,6 +437,7 @@
     try {
       await audio.play();
     } catch (caught) {
+      playbackLoading = false;
       playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
     }
   }
@@ -444,6 +450,7 @@
     currentTime = 0;
     duration = 0;
     isPlaying = false;
+    playbackLoading = false;
   }
 
   function clearQueue() {
@@ -464,6 +471,7 @@
       }
     } else {
       audio.pause();
+      playbackLoading = false;
       void saveServerQueue();
     }
   }
@@ -477,6 +485,7 @@
     if (currentIndex + 1 >= queue.length) {
       audio.pause();
       isPlaying = false;
+      playbackLoading = false;
       void saveServerQueue();
       return;
     }
@@ -758,6 +767,14 @@
   <title>Navidrome Artists</title>
 </svelte:head>
 
+{#snippet soundBars()}
+  <span class="sound-bars"><span></span><span></span><span></span></span>
+{/snippet}
+
+{#snippet loadingSpinner()}
+  <span class="loading-spinner"></span>
+{/snippet}
+
 <main class="app-shell">
   <header class="topbar">
     {#if activeView === 'library' && selectedArtist}
@@ -883,7 +900,13 @@
       bind:this={audio}
       preload="metadata"
       onplay={() => isPlaying = true}
+      onplaying={() => {
+        isPlaying = true;
+        playbackLoading = false;
+      }}
       onpause={() => isPlaying = false}
+      onwaiting={() => playbackLoading = true}
+      oncanplay={() => playbackLoading = false}
       onended={nextTrack}
       ontimeupdate={updatePlaybackTime}
       onloadedmetadata={() => {
@@ -895,6 +918,7 @@
         }
       }}
       onerror={() => {
+        playbackLoading = false;
         if (audio.currentSrc) playbackError = 'The track could not be played.';
       }}
     ></audio>
@@ -926,7 +950,7 @@
     <div class="controls">
       <button type="button" onclick={previousTrack} disabled={currentIndex <= 0} title="Previous">⏮</button>
       <button type="button" class="play-control" onclick={togglePlayback} disabled={queue.length === 0} title={isPlaying ? 'Pause' : 'Play'}>
-        {isPlaying ? 'Ⅱ' : '▶'}
+        {#if playbackLoading}{@render loadingSpinner()}{:else}{isPlaying ? 'Ⅱ' : '▶'}{/if}
       </button>
       <button type="button" onclick={nextTrack} disabled={currentIndex < 0 || currentIndex + 1 >= queue.length} title="Next">⏭</button>
     </div>
@@ -951,10 +975,18 @@
           {#each queue as item, index}
             <div class="track-row" class:current={index === currentIndex}>
               <button type="button" class="track-main" onclick={() => playQueueIndex(index)}>
-                <span class="track-number">{index === currentIndex ? '▶' : index + 1}</span>
+                <span class="track-number">{index + 1}</span>
                 <span>{item.title}</span>
               </button>
-              <button type="button" class="row-action" onclick={() => playQueueIndex(index)}>▶</button>
+              <button type="button" class="row-action" onclick={() => playQueueIndex(index)}>
+                {#if index === currentIndex && playbackLoading}
+                  {@render loadingSpinner()}
+                {:else if index === currentIndex && isPlaying}
+                  {@render soundBars()}
+                {:else}
+                  ▶
+                {/if}
+              </button>
             </div>
           {/each}
         </div>
@@ -1002,7 +1034,15 @@
                 <span class="track-number">{track.track ?? index + 1}</span>
                 <span>{track.title}</span>
               </button>
-              <button type="button" class="row-action" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>▶</button>
+              <button type="button" class="row-action" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>
+                {#if queue[currentIndex]?.id === track.id && playbackLoading}
+                  {@render loadingSpinner()}
+                {:else if queue[currentIndex]?.id === track.id && isPlaying}
+                  {@render soundBars()}
+                {:else}
+                  ▶
+                {/if}
+              </button>
               <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>＋</button>
             </div>
           {:else}
@@ -1026,7 +1066,15 @@
                   <small>{album.year ?? 'Unknown year'} · {album.tracks.length} tracks</small>
                 </span>
               </a>
-              <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>▶</button>
+              <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>
+                {#if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === selectedArtist.name && playbackLoading}
+                  {@render loadingSpinner()}
+                {:else if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === selectedArtist.name && isPlaying}
+                  {@render soundBars()}
+                {:else}
+                  ▶
+                {/if}
+              </button>
               <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>＋</button>
             </article>
           {:else}
@@ -1047,7 +1095,15 @@
                   <strong class="artist-name">{artist.name}</strong>
                 </span>
               </a>
-              <button type="button" class="artist-play" onclick={() => playArtist(artist)}>▶</button>
+              <button type="button" class="artist-play" onclick={() => playArtist(artist)}>
+                {#if queue[currentIndex]?.artist === artist.name && playbackLoading}
+                  {@render loadingSpinner()}
+                {:else if queue[currentIndex]?.artist === artist.name && isPlaying}
+                  {@render soundBars()}
+                {:else}
+                  ▶
+                {/if}
+              </button>
             </article>
           {/each}
         </div>
@@ -1091,7 +1147,7 @@
         }}
         onkeydown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') togglePlayback();
-        }}>{isPlaying ? 'Ⅱ' : '▶'}</span
+        }}>{#if playbackLoading}{@render loadingSpinner()}{:else}{isPlaying ? 'Ⅱ' : '▶'}{/if}</span
       >
       <span class="mini-progress"><span style:width={`${playbackPercent()}%`}></span></span>
     </a>
@@ -1615,11 +1671,56 @@
     text-align: right;
   }
 
+  .loading-spinner {
+    display: block;
+    width: 1rem;
+    height: 1rem;
+    border: 0.15rem solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: loading-spin 550ms linear infinite;
+  }
+
+  @keyframes loading-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .sound-bars {
+    display: inline-flex;
+    height: 1rem;
+    align-items: flex-end;
+    gap: 0.14rem;
+  }
+
+  .sound-bars > span {
+    width: 0.16rem;
+    height: 100%;
+    border-radius: 999px;
+    background: currentColor;
+    transform-origin: bottom;
+    animation: sound-bar 350ms ease-in-out infinite alternate;
+  }
+
+  .sound-bars > span:nth-child(2) {
+    animation-delay: -230ms;
+  }
+
+  .sound-bars > span:nth-child(3) {
+    animation-delay: -115ms;
+  }
+
+  @keyframes sound-bar {
+    from { transform: scaleY(0.25); }
+    to { transform: scaleY(1); }
+  }
+
   .row-action {
+    display: grid;
     width: 2.35rem;
     height: 2.35rem;
     flex: none;
     padding: 0;
+    place-items: center;
     color: #bcb4ff;
     background: transparent;
     font-size: 1rem;
