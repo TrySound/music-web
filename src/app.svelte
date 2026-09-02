@@ -646,8 +646,6 @@
         <strong>{queue[currentIndex].title}</strong><br />
         {queue[currentIndex].artist} — {queue[currentIndex].album}
       </p>
-    {:else}
-      <p>Nothing is playing.</p>
     {/if}
 
     <div class="controls">
@@ -807,12 +805,12 @@
     {/if}
   </section>
 
-  {#if currentIndex >= 0 && queue[currentIndex] && activeView !== 'player'}
+  {#if queue.length > 0 && activeView !== 'player'}
     <a class="mini-player" href="#/player">
       <span class="mini-art">♫</span>
       <span class="mini-copy">
-        <strong>{queue[currentIndex].title}</strong>
-        <small>{queue[currentIndex].artist}</small>
+        <strong>{queue[currentIndex >= 0 ? currentIndex : 0].title}</strong>
+        <small>{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small>
       </span>
       <span
         class="mini-control"
@@ -833,9 +831,6 @@
   <nav class="bottom-nav">
     <a class:active={activeView === 'library'} href="#/library">
       <span>♫</span><small>Library</small>
-    </a>
-    <a class:active={activeView === 'player'} href="#/player">
-      <span>▶</span><small>Player</small>
     </a>
     <a class:active={activeView === 'settings'} href="#/settings">
       <span>⚙</span><small>Settings</small>
@@ -1297,8 +1292,8 @@
     max-width: 32rem;
     min-height: 4.25rem;
     margin: 0 auto;
-    padding: 0.35rem 0.4rem max(0.35rem, env(safe-area-inset-bottom));
-    grid-template-columns: repeat(3, 1fr);
+    padding: 0 0 env(safe-area-inset-bottom);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     border-top: 1px solid #292f3b;
     background: rgb(17 20 27 / 97%);
     backdrop-filter: blur(14px);
@@ -1306,9 +1301,11 @@
 
   .bottom-nav a {
     display: grid;
+    width: 100%;
+    min-height: 4.25rem;
     gap: 0.15rem;
     place-items: center;
-    border-radius: 0.65rem;
+    border-radius: 0;
     color: #8f96a5;
     background: transparent;
     font-size: 1.05rem;
