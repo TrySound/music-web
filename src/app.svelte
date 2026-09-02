@@ -5,6 +5,7 @@
   import { cacheTrack, getCachedTrack } from './track-cache';
 
   const authStorageKey = 'navidrome-auth';
+  const offlineModeStorageKey = 'navidrome-offline-mode';
 
   interface Track {
     album?: string;
@@ -109,7 +110,10 @@
   let playbackRequest = 0;
   let downloadingTrackIds = new Set<string>();
   let downloadedTrackIds = new Set<string>();
+  let downloadedCacheKey = '';
   let downloadingCollection = '';
+  let offlineMode = false;
+  let offlineScanning = false;
   let loading = false;
   let refreshing = false;
   let refreshError = '';
@@ -206,6 +210,8 @@
   });
 
   onMount(() => {
+    offlineMode = localStorage.getItem(offlineModeStorageKey) === 'true';
+
     try {
       const value = localStorage.getItem(authStorageKey);
       if (!value) {
@@ -302,6 +308,28 @@
     return artist.albums.flatMap((album) => albumQueueItems(artist, album));
   }
 
+  function visibleTracks(album: Album) {
+    return offlineMode
+      ? album.tracks.filter((track) => downloadedTrackIds.has(track.id))
+      : album.tracks;
+  }
+
+  function visibleAlbums(artist: Artist) {
+    return offlineMode
+      ? artist.albums.filter((album) => visibleTracks(album).length > 0)
+      : artist.albums;
+  }
+
+  function visibleArtists() {
+    return offlineMode
+      ? artists.filter((artist) => visibleAlbums(artist).length > 0)
+      : artists;
+  }
+
+  function availableQueueItems(items: QueueItem[]) {
+    return offlineMode ? items.filter((track) => downloadedTrackIds.has(track.id)) : items;
+  }
+
   function trackQueueItem(artist: Artist, album: Album, track: Track): QueueItem {
     return {
       album: album.name,
@@ -314,25 +342,26 @@
   }
 
   function playAlbum(artist: Artist, album: Album) {
-    replaceQueueAndPlay(albumQueueItems(artist, album));
+    replaceQueueAndPlay(availableQueueItems(albumQueueItems(artist, album)));
   }
 
   function addAlbumToQueue(artist: Artist, album: Album) {
-    queue = [...queue, ...albumQueueItems(artist, album)];
+    queue = [...queue, ...availableQueueItems(albumQueueItems(artist, album))];
     scheduleQueueSave();
   }
 
   function playArtist(artist: Artist) {
-    replaceQueueAndPlay(artistQueueItems(artist));
+    replaceQueueAndPlay(availableQueueItems(artistQueueItems(artist)));
   }
 
   function playTrack(artist: Artist, album: Album, track: Track) {
-    const albumTracks = albumQueueItems(artist, album);
+    const albumTracks = availableQueueItems(albumQueueItems(artist, album));
     const selectedIndex = albumTracks.findIndex((item) => item.id === track.id);
     replaceQueueAndPlay(albumTracks, Math.max(0, selectedIndex));
   }
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
+    if (offlineMode && !downloadedTrackIds.has(track.id)) return;
     queue = [...queue, trackQueueItem(artist, album, track)];
     scheduleQueueSave();
   }
@@ -446,6 +475,45 @@
     }
   }
 
+  async function scanOfflineLibrary() {
+    if (!activeAuth) return;
+
+    offlineScanning = true;
+    try {
+      const cacheKey = `${activeAuth.host}\n${activeAuth.username}`;
+      if (downloadedCacheKey !== cacheKey) {
+        downloadedTrackIds = new Set();
+        downloadedCacheKey = cacheKey;
+      }
+
+      await refreshDownloadedState(artists.flatMap(artistQueueItems));
+
+      const currentTrackId = queue[currentIndex]?.id;
+      const offlineQueue = queue.filter((track) => downloadedTrackIds.has(track.id));
+      const offlineIndex = currentTrackId
+        ? offlineQueue.findIndex((track) => track.id === currentTrackId)
+        : -1;
+
+      if (currentTrackId && offlineIndex < 0) stopPlayback();
+      queue = offlineQueue;
+      currentIndex = offlineIndex;
+      syncCurrentRoute();
+    } finally {
+      offlineScanning = false;
+    }
+  }
+
+  async function setOfflineMode(enabled: boolean) {
+    offlineMode = enabled;
+    localStorage.setItem(offlineModeStorageKey, String(enabled));
+
+    if (enabled) await scanOfflineLibrary();
+    else if (activeAuth) {
+      loadedQueueKey = '';
+      void loadArtists(activeAuth);
+    }
+  }
+
   function collectionIsDownloaded(items: QueueItem[]) {
     return items.length > 0 && items.every((track) => downloadedTrackIds.has(track.id));
   }
@@ -479,7 +547,7 @@
   }
 
   async function saveServerQueue() {
-    if (!activeAuth) return;
+    if (!activeAuth || offlineMode) return;
 
     const query = new URLSearchParams({
       u: activeAuth.username,
@@ -787,6 +855,7 @@
   }
 
   function connectionStatusLabel() {
+    if (offlineMode) return 'Offline mode';
     if (connectionStatus === 'connected') return 'Connected';
     if (connectionStatus === 'connecting') return 'Checking…';
     if (connectionStatus === 'error') return 'Connection failed';
@@ -847,6 +916,14 @@
         connectedHost = '';
       }
 
+      if (offlineMode) {
+        activeAuth = credentials;
+        connectionStatus = 'disconnected';
+        if (!cached) throw new Error('No cached library is available offline.');
+        await scanOfflineLibrary();
+        return;
+      }
+
       const lastModified = await getLastModified(server, query, cached?.lastModified);
       activeAuth = credentials;
       connectionStatus = 'connected';
@@ -854,6 +931,7 @@
 
       if (loadedQueueKey !== cacheKey) {
         downloadedTrackIds = new Set();
+        downloadedCacheKey = cacheKey;
         try {
           await loadServerQueue(server, query);
           loadedQueueKey = cacheKey;
@@ -944,9 +1022,10 @@
       <summary>
         <span
           class="connection-dot"
-          class:connected={connectionStatus === 'connected'}
-          class:connecting={connectionStatus === 'connecting'}
-          class:failed={connectionStatus === 'error'}
+          class:offline={offlineMode}
+          class:connected={!offlineMode && connectionStatus === 'connected'}
+          class:connecting={!offlineMode && connectionStatus === 'connecting'}
+          class:failed={!offlineMode && connectionStatus === 'error'}
         ></span>
         <span class="connection-summary">
           <strong>{activeAuth?.host ?? 'Add a server'}</strong>
@@ -966,10 +1045,10 @@
           <button
             type="button"
             class="refresh-data"
-            disabled={loading || refreshing}
+            disabled={offlineMode || loading || refreshing}
             onclick={() => loadArtists(activeAuth!, true)}
           >
-            {loading || refreshing ? 'Refreshing…' : 'Refresh library data'}
+            {offlineMode ? 'Unavailable offline' : loading || refreshing ? 'Refreshing…' : 'Refresh library data'}
           </button>
           <h3>Edit connection</h3>
         {/if}
@@ -996,7 +1075,7 @@
             <input type="password" bind:value={password} autocomplete="current-password" required />
           </label>
 
-          <button type="submit" disabled={loading || refreshing}>
+          <button type="submit" disabled={offlineMode || loading || refreshing}>
             {loading ? 'Connecting…' : activeAuth ? 'Save connection' : 'Connect'}
           </button>
 
@@ -1004,6 +1083,26 @@
         </form>
       </div>
     </details>
+
+    <div class="settings-option">
+      <div>
+        <strong>Offline library</strong>
+        <small>
+          {offlineScanning
+            ? 'Checking downloaded tracks…'
+            : 'Show only music downloaded to this device.'}
+        </small>
+      </div>
+      <label class="switch">
+        <input
+          type="checkbox"
+          checked={offlineMode}
+          disabled={offlineScanning}
+          onchange={(event) => void setOfflineMode(event.currentTarget.checked)}
+        />
+        <span></span>
+      </label>
+    </div>
   </section>
 
   {#if error}
@@ -1017,7 +1116,7 @@
   <section class="view player-view" class:hidden={activeView !== 'player'}>
     <div class="player-main">
       <div class="artwork">
-      {#if currentIndex >= 0 && queue[currentIndex] && coverArtUrl(queue[currentIndex].coverArt)}
+      {#if !offlineMode && currentIndex >= 0 && queue[currentIndex] && coverArtUrl(queue[currentIndex].coverArt)}
         <img src={coverArtUrl(queue[currentIndex].coverArt)} alt="" />
       {:else}
         <span>♫</span>
@@ -1135,12 +1234,12 @@
       <div class="section-heading">
         <div>
           <span class="eyebrow">
-            {selectedAlbum ? selectedArtist?.name : selectedArtist ? 'Albums' : 'Your music'}
+            {selectedAlbum ? selectedArtist?.name : selectedArtist ? 'Albums' : offlineMode ? 'Downloaded music' : 'Your music'}
           </span>
-          <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${artists.length} artists`}</h2>
+          <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${visibleArtists().length} artists`}</h2>
           {#if selectedAlbum}
             <p class="library-meta">
-              {selectedArtist?.name} · {selectedAlbum.year ?? 'Unknown year'} · {selectedAlbum.tracks.length} track{selectedAlbum.tracks.length === 1 ? '' : 's'}
+              {selectedArtist?.name} · {selectedAlbum.year ?? 'Unknown year'} · {visibleTracks(selectedAlbum).length} track{visibleTracks(selectedAlbum).length === 1 ? '' : 's'}
             </p>
             {#if albumGenres(selectedAlbum).length > 0}
               <div class="genre-list">
@@ -1149,7 +1248,7 @@
             {/if}
           {:else if selectedArtist}
             <p class="library-meta">
-              {selectedArtist.albums.length} album{selectedArtist.albums.length === 1 ? '' : 's'}
+              {visibleAlbums(selectedArtist).length} album{visibleAlbums(selectedArtist).length === 1 ? '' : 's'}
             </p>
             {#if artistGenres(selectedArtist).length > 0}
               <div class="genre-list">
@@ -1158,7 +1257,7 @@
             {/if}
           {/if}
         </div>
-        {#if selectedArtist && selectedAlbum}
+        {#if !offlineMode && selectedArtist && selectedAlbum}
           <button
             type="button"
             class="header-download"
@@ -1173,7 +1272,7 @@
               ↓
             {/if}
           </button>
-        {:else if selectedArtist}
+        {:else if !offlineMode && selectedArtist}
           <button
             type="button"
             class="header-download"
@@ -1191,9 +1290,14 @@
         {/if}
       </div>
 
-      {#if selectedArtist && selectedAlbum}
+      {#if offlineScanning}
+        <div class="empty-state">
+          <div class="scan-spinner">{@render loadingSpinner()}</div>
+          <p>Checking downloaded music…</p>
+        </div>
+      {:else if selectedArtist && selectedAlbum}
         <div class="track-list">
-          {#each selectedAlbum.tracks as track, index}
+          {#each visibleTracks(selectedAlbum) as track, index}
             <div class="track-row">
               <button type="button" class="track-main" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>
                 <span class="track-number">{track.track ?? index + 1}</span>
@@ -1218,16 +1322,16 @@
               <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>＋</button>
             </div>
           {:else}
-            <div class="empty-state"><p>No tracks found.</p></div>
+            <div class="empty-state"><p>{offlineMode ? 'No downloaded tracks.' : 'No tracks found.'}</p></div>
           {/each}
         </div>
       {:else if selectedArtist}
         <div class="album-list">
-          {#each selectedArtist.albums as album}
+          {#each visibleAlbums(selectedArtist) as album}
             <article class="album-row">
               <a class="album-main" href={albumRoute(selectedArtist, album)}>
                 <span class="cover album-cover">
-                  {#if coverArtUrl(album.coverArt)}
+                  {#if !offlineMode && coverArtUrl(album.coverArt)}
                     <img src={coverArtUrl(album.coverArt)} alt="" loading="lazy" />
                   {:else}
                     <span>♫</span>
@@ -1235,7 +1339,7 @@
                 </span>
                 <span class="album-copy">
                   <strong>{album.name}</strong>
-                  <small>{album.year ?? 'Unknown year'} · {album.tracks.length} tracks</small>
+                  <small>{album.year ?? 'Unknown year'} · {visibleTracks(album).length} tracks</small>
                 </span>
               </a>
               <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>
@@ -1250,16 +1354,16 @@
               <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>＋</button>
             </article>
           {:else}
-            <div class="empty-state"><p>No albums found.</p></div>
+            <div class="empty-state"><p>{offlineMode ? 'No downloaded albums.' : 'No albums found.'}</p></div>
           {/each}
         </div>
-      {:else if artists.length > 0}
+      {:else if visibleArtists().length > 0}
         <div class="artist-grid">
-          {#each artists as artist}
+          {#each visibleArtists() as artist}
             <article class="artist-card">
               <a class="artist-main" href={artistRoute(artist)}>
                 <span class="cover artist-cover">
-                  {#if coverArtUrl(artistCoverArt(artist))}
+                  {#if !offlineMode && coverArtUrl(artistCoverArt(artist))}
                     <img src={coverArtUrl(artistCoverArt(artist))} alt="" loading="lazy" />
                   {:else}
                     <span>♫</span>
@@ -1282,7 +1386,7 @@
       {:else}
         <div class="empty-state">
           <span>♫</span>
-          <p>No artists found.</p>
+          <p>{offlineMode ? 'No downloaded artists.' : 'No artists found.'}</p>
         </div>
       {/if}
     {:else if !loading}
@@ -1298,7 +1402,7 @@
   {#if queue.length > 0 && activeView !== 'player'}
     <a class="mini-player" href="#/player">
       <span class="mini-art">
-        {#if coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
+        {#if !offlineMode && coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
           <img src={coverArtUrl(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)} alt="" />
         {:else}
           <span>♫</span>
@@ -1422,7 +1526,7 @@
     margin-top: 1.5rem;
   }
 
-  input:not([type='range']) {
+  input:not([type='range']):not([type='checkbox']) {
     width: 100%;
     padding: 0.8rem 0.9rem;
     border: 1px solid #343a48;
@@ -1432,7 +1536,7 @@
     background: #191d27;
   }
 
-  input:not([type='range']):focus {
+  input:not([type='range']):not([type='checkbox']):focus {
     border-color: #8d7dff;
   }
 
@@ -1464,6 +1568,11 @@
     flex: none;
     border-radius: 50%;
     background: #5d6472;
+  }
+
+  .connection-dot.offline {
+    background: #8d7dff;
+    box-shadow: 0 0 0.7rem rgb(141 125 255 / 45%);
   }
 
   .connection-dot.connected {
@@ -1534,6 +1643,68 @@
     padding: 0.65rem 1rem;
     color: #bcb4ff;
     background: #252438;
+  }
+
+  .settings-option {
+    display: flex;
+    margin-top: 1rem;
+    padding: 1rem;
+    align-items: center;
+    gap: 1rem;
+    border: 1px solid #2c3240;
+    border-radius: 0.9rem;
+    background: #171b23;
+  }
+
+  .settings-option > div {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .switch {
+    position: relative;
+    display: block;
+    width: 3rem;
+    height: 1.7rem;
+    flex: none;
+  }
+
+  .switch input {
+    position: absolute;
+    opacity: 0;
+  }
+
+  .switch span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    background: #343a48;
+    transition: background 160ms ease;
+  }
+
+  .switch span::after {
+    display: block;
+    width: 1.3rem;
+    height: 1.3rem;
+    margin: 0.2rem;
+    border-radius: 50%;
+    content: '';
+    background: #f5f6f8;
+    transition: transform 160ms ease;
+  }
+
+  .switch input:checked + span {
+    background: #7565f6;
+  }
+
+  .switch input:checked + span::after {
+    transform: translateX(1.3rem);
+  }
+
+  .switch input:disabled + span {
+    opacity: 0.5;
   }
 
   a {
