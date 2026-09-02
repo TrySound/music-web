@@ -90,11 +90,7 @@
   let connectedHost = '';
 
   function normalizeHost(value: string) {
-    const withProtocol = value.startsWith('/')
-      ? new URL(value, window.location.origin).toString()
-      : /^https?:\/\//i.test(value)
-        ? value
-        : `https://${value}`;
+    const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
     const url = new URL(withProtocol);
     return url.toString().replace(/\/$/, '');
   }
@@ -598,7 +594,7 @@
       <input
         type="text"
         bind:value={host}
-        placeholder="https://music.example.com or /navidrome"
+        placeholder="https://music.example.com"
         autocomplete="url"
         required
       />
