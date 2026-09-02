@@ -107,6 +107,7 @@
   let error = '';
   let connectedHost = '';
   let connectionStatus: ConnectionStatus = 'disconnected';
+  let connectionOpen = false;
 
   function normalizeHost(value: string) {
     const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
@@ -183,6 +184,7 @@
     try {
       const value = localStorage.getItem(authStorageKey);
       if (!value) {
+        connectionOpen = true;
         navigateTo('#/settings', 'replace');
         return;
       }
@@ -190,6 +192,7 @@
       const savedAuth: unknown = JSON.parse(value);
       if (!isSavedAuth(savedAuth)) {
         localStorage.removeItem(authStorageKey);
+        connectionOpen = true;
         navigateTo('#/settings', 'replace');
         return;
       }
@@ -200,6 +203,8 @@
       void loadArtists(savedAuth);
     } catch {
       localStorage.removeItem(authStorageKey);
+      connectionOpen = true;
+      navigateTo('#/settings', 'replace');
     }
   });
 
@@ -655,7 +660,10 @@
   async function submitConnection(event: SubmitEvent) {
     event.preventDefault();
     await loadArtists();
-    if (!error) navigateTo('#/library');
+    if (!error) {
+      connectionOpen = false;
+      navigateTo('#/library');
+    }
   }
 
   async function loadArtists(savedAuth?: SavedAuth, forceRefresh = false) {
@@ -778,7 +786,7 @@
         : 'Enter your Navidrome server details. Authentication stays on this device.'}
     </p>
 
-    <details class="connection-card" open={!activeAuth}>
+    <details class="connection-card" bind:open={connectionOpen}>
       <summary>
         <span
           class="connection-dot"
