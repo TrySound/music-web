@@ -2,12 +2,14 @@
   import { md5 } from 'js-md5';
   import { onMount } from 'svelte';
   import { loadLibraryCache, saveLibraryCache } from './library-cache';
+  import { cacheTrack, getCachedTrack } from './track-cache';
 
   const authStorageKey = 'navidrome-auth';
 
   interface Track {
     album?: string;
     artist?: string;
+    contentType?: string;
     coverArt?: string;
     genre?: string;
     genres?: { name: string }[];
@@ -20,6 +22,7 @@
   interface QueueItem {
     album: string;
     artist: string;
+    contentType?: string;
     coverArt?: string;
     id: string;
     title: string;
@@ -102,6 +105,11 @@
   let loadedQueueKey = '';
   let queueSaveTimer: ReturnType<typeof setTimeout> | undefined;
   let lastPositionSync = 0;
+  let playbackObjectUrl = '';
+  let playbackRequest = 0;
+  let downloadingTrackIds = new Set<string>();
+  let downloadedTrackIds = new Set<string>();
+  let downloadingCollection = '';
   let loading = false;
   let refreshing = false;
   let refreshError = '';
@@ -155,6 +163,14 @@
 
     if (selectedArtist && parts[3] === 'album' && parts[4]) {
       selectedAlbum = selectedArtist.albums.find((album) => album.id === parts[4]) ?? null;
+    }
+
+    if (selectedArtist) {
+      void refreshDownloadedState(
+        selectedAlbum
+          ? albumQueueItems(selectedArtist, selectedAlbum)
+          : artistQueueItems(selectedArtist)
+      );
     }
   }
 
@@ -275,6 +291,7 @@
     return album.tracks.map((track) => ({
       album: album.name,
       artist: artist.name,
+      contentType: track.contentType,
       coverArt: track.coverArt ?? album.coverArt ?? artistCoverArt(artist),
       id: track.id,
       title: track.title
@@ -289,6 +306,7 @@
     return {
       album: album.name,
       artist: artist.name,
+      contentType: track.contentType,
       coverArt: track.coverArt ?? album.coverArt ?? artistCoverArt(artist),
       id: track.id,
       title: track.title
@@ -333,6 +351,105 @@
     return `${activeAuth.host}/rest/stream.view?${query}`;
   }
 
+  function trackCacheKey(track: QueueItem) {
+    if (!activeAuth) return track.id;
+    return `${activeAuth.host}\n${activeAuth.username}\n${track.id}`;
+  }
+
+  function updateTrackSet(set: Set<string>, trackId: string, add: boolean) {
+    const next = new Set(set);
+    if (add) next.add(trackId);
+    else next.delete(trackId);
+    return next;
+  }
+
+  async function ensureTrackCached(track: QueueItem) {
+    const source = streamUrl(track);
+    if (!source) throw new Error('No active Navidrome connection.');
+
+    downloadingTrackIds = updateTrackSet(downloadingTrackIds, track.id, true);
+    try {
+      const key = trackCacheKey(track);
+      const file = (await getCachedTrack(key)) ?? (await cacheTrack(key, source));
+      downloadedTrackIds = updateTrackSet(downloadedTrackIds, track.id, true);
+      return file;
+    } finally {
+      downloadingTrackIds = updateTrackSet(downloadingTrackIds, track.id, false);
+    }
+  }
+
+  async function downloadQueueTrack(track: QueueItem) {
+    try {
+      await ensureTrackCached(track);
+    } catch (caught) {
+      playbackError = caught instanceof Error ? caught.message : 'The track could not be downloaded.';
+    }
+  }
+
+  async function downloadTracks(items: QueueItem[]) {
+    let nextTrack = 0;
+
+    async function worker() {
+      while (nextTrack < items.length) {
+        const track = items[nextTrack++];
+        await downloadQueueTrack(track);
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(3, items.length) }, () => worker()));
+  }
+
+  async function downloadAlbum(artist: Artist, album: Album) {
+    const key = `album:${album.id}`;
+    downloadingCollection = key;
+    try {
+      await downloadTracks(albumQueueItems(artist, album));
+    } finally {
+      if (downloadingCollection === key) downloadingCollection = '';
+    }
+  }
+
+  async function downloadArtist(artist: Artist) {
+    const key = `artist:${artist.id ?? artist.name}`;
+    downloadingCollection = key;
+    try {
+      await downloadTracks(artistQueueItems(artist));
+    } finally {
+      if (downloadingCollection === key) downloadingCollection = '';
+    }
+  }
+
+  function downloadLibraryTrack(artist: Artist, album: Album, track: Track) {
+    void downloadQueueTrack(trackQueueItem(artist, album, track));
+  }
+
+  async function refreshDownloadedState(items: QueueItem[]) {
+    if (!activeAuth) return;
+
+    let nextTrack = 0;
+    const cachedIds: string[] = [];
+
+    async function worker() {
+      while (nextTrack < items.length) {
+        const track = items[nextTrack++];
+        try {
+          if (await getCachedTrack(trackCacheKey(track))) cachedIds.push(track.id);
+        } catch {
+          return;
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(8, items.length) }, () => worker()));
+    if (cachedIds.length > 0) {
+      downloadedTrackIds = new Set([...downloadedTrackIds, ...cachedIds]);
+    }
+  }
+
+  function collectionIsDownloaded(items: QueueItem[]) {
+    return items.length > 0 && items.every((track) => downloadedTrackIds.has(track.id));
+  }
+
   async function loadServerQueue(server: string, authQuery: URLSearchParams) {
     const response = await fetch(`${server}/rest/getPlayQueue.view?${authQuery}`);
     if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
@@ -348,6 +465,7 @@
     queue = (playQueue?.entry ?? []).map((track) => ({
       album: track.album ?? 'Unknown album',
       artist: track.artist ?? 'Unknown artist',
+      contentType: track.contentType,
       coverArt: track.coverArt,
       id: track.id,
       title: track.title
@@ -355,16 +473,9 @@
     currentIndex = playQueue?.current
       ? queue.findIndex((track) => track.id === playQueue.current)
       : -1;
+    void refreshDownloadedState(queue);
 
-    if (currentIndex >= 0) {
-      const source = streamUrl(queue[currentIndex]);
-      if (source) {
-        pendingSeek = (playQueue?.position ?? 0) / 1000;
-        playbackLoading = true;
-        audio.src = source;
-        audio.load();
-      }
-    }
+    if (currentIndex >= 0) pendingSeek = (playQueue?.position ?? 0) / 1000;
   }
 
   async function saveServerQueue() {
@@ -417,6 +528,7 @@
   function replaceQueueAndPlay(items: QueueItem[], startIndex = 0) {
     queue = items;
     currentIndex = items.length > 0 ? Math.min(startIndex, items.length - 1) : -1;
+    pendingSeek = 0;
     scheduleQueueSave();
     if (currentIndex >= 0) void playCurrent();
     else stopPlayback();
@@ -424,17 +536,22 @@
 
   async function playCurrent() {
     const track = queue[currentIndex];
-    const source = track ? streamUrl(track) : '';
-    if (!source) return;
+    if (!track) return;
 
+    const request = ++playbackRequest;
     playbackError = '';
     playbackLoading = true;
     currentTime = 0;
     duration = 0;
-    audio.src = source;
     scheduleQueueSave();
 
     try {
+      const file = await ensureTrackCached(track);
+      if (request !== playbackRequest) return;
+      if (playbackObjectUrl) URL.revokeObjectURL(playbackObjectUrl);
+      const playableFile = track.contentType ? new Blob([file], { type: track.contentType }) : file;
+      playbackObjectUrl = URL.createObjectURL(playableFile);
+      audio.src = playbackObjectUrl;
       await audio.play();
     } catch (caught) {
       playbackLoading = false;
@@ -443,9 +560,12 @@
   }
 
   function stopPlayback() {
+    playbackRequest += 1;
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
+    if (playbackObjectUrl) URL.revokeObjectURL(playbackObjectUrl);
+    playbackObjectUrl = '';
     currentIndex = -1;
     currentTime = 0;
     duration = 0;
@@ -463,6 +583,9 @@
     if (audio.paused) {
       if (currentIndex < 0 && queue.length > 0) {
         currentIndex = 0;
+        pendingSeek = 0;
+        void playCurrent();
+      } else if (!audio.currentSrc) {
         void playCurrent();
       } else {
         void audio.play().catch((caught: unknown) => {
@@ -478,6 +601,7 @@
 
   function playQueueIndex(index: number) {
     currentIndex = index;
+    pendingSeek = 0;
     void playCurrent();
   }
 
@@ -490,6 +614,7 @@
       return;
     }
     currentIndex += 1;
+    pendingSeek = 0;
     void playCurrent();
   }
 
@@ -500,6 +625,7 @@
       return;
     }
     currentIndex -= 1;
+    pendingSeek = 0;
     void playCurrent();
   }
 
@@ -727,6 +853,7 @@
       localStorage.setItem(authStorageKey, JSON.stringify(credentials));
 
       if (loadedQueueKey !== cacheKey) {
+        downloadedTrackIds = new Set();
         try {
           await loadServerQueue(server, query);
           loadedQueueKey = cacheKey;
@@ -978,13 +1105,20 @@
                 <span class="track-number">{index + 1}</span>
                 <span>{item.title}</span>
               </button>
-              <button type="button" class="row-action" onclick={() => playQueueIndex(index)}>
-                {#if index === currentIndex && playbackLoading}
+              <button
+                type="button"
+                class="row-action"
+                onclick={() => downloadQueueTrack(item)}
+                title="Download track"
+              >
+                {#if downloadingTrackIds.has(item.id) || (index === currentIndex && playbackLoading)}
                   {@render loadingSpinner()}
                 {:else if index === currentIndex && isPlaying}
                   {@render soundBars()}
+                {:else if downloadedTrackIds.has(item.id)}
+                  ✓
                 {:else}
-                  ▶
+                  ↓
                 {/if}
               </button>
             </div>
@@ -1024,6 +1158,37 @@
             {/if}
           {/if}
         </div>
+        {#if selectedArtist && selectedAlbum}
+          <button
+            type="button"
+            class="header-download"
+            onclick={() => downloadAlbum(selectedArtist!, selectedAlbum!)}
+            title="Download album"
+          >
+            {#if downloadingCollection === `album:${selectedAlbum.id}`}
+              {@render loadingSpinner()}
+            {:else if collectionIsDownloaded(albumQueueItems(selectedArtist, selectedAlbum))}
+              ✓
+            {:else}
+              ↓
+            {/if}
+          </button>
+        {:else if selectedArtist}
+          <button
+            type="button"
+            class="header-download"
+            onclick={() => downloadArtist(selectedArtist!)}
+            title="Download artist"
+          >
+            {#if downloadingCollection === `artist:${selectedArtist.id ?? selectedArtist.name}`}
+              {@render loadingSpinner()}
+            {:else if collectionIsDownloaded(artistQueueItems(selectedArtist))}
+              ✓
+            {:else}
+              ↓
+            {/if}
+          </button>
+        {/if}
       </div>
 
       {#if selectedArtist && selectedAlbum}
@@ -1034,13 +1199,20 @@
                 <span class="track-number">{track.track ?? index + 1}</span>
                 <span>{track.title}</span>
               </button>
-              <button type="button" class="row-action" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>
-                {#if queue[currentIndex]?.id === track.id && playbackLoading}
+              <button
+                type="button"
+                class="row-action"
+                onclick={() => downloadLibraryTrack(selectedArtist!, selectedAlbum!, track)}
+                title="Download track"
+              >
+                {#if downloadingTrackIds.has(track.id) || (queue[currentIndex]?.id === track.id && playbackLoading)}
                   {@render loadingSpinner()}
                 {:else if queue[currentIndex]?.id === track.id && isPlaying}
                   {@render soundBars()}
+                {:else if downloadedTrackIds.has(track.id)}
+                  ✓
                 {:else}
-                  ▶
+                  ↓
                 {/if}
               </button>
               <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>＋</button>
@@ -1409,6 +1581,23 @@
 
   .section-heading h2 {
     margin: 0;
+  }
+
+  .section-heading > div {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .header-download {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+    flex: none;
+    place-items: center;
+    color: #bcb4ff;
+    background: #252438;
+    font-size: 1.2rem;
   }
 
   .library-meta {
