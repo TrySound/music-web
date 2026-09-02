@@ -1041,12 +1041,8 @@
   <title>Navidrome Artists</title>
 </svelte:head>
 
-{#snippet soundBars()}
-  <span class="sound-bars"><span></span><span></span><span></span></span>
-{/snippet}
-
-{#snippet loadingSpinner()}
-  <span class="loading-spinner"></span>
+{#snippet icon(name: string)}
+  <svg class="icon" aria-hidden="true"><use href={`#icon-${name}`}></use></svg>
 {/snippet}
 
 <main class="app-shell">
@@ -1056,9 +1052,9 @@
         class="topbar-icon"
         href={selectedAlbum ? artistRoute(selectedArtist) : '#/library'}
         title="Back"
-      >‹</a>
+      >{@render icon('back')}</a>
     {:else if activeView === 'player'}
-      <button type="button" class="topbar-icon" onclick={goBack} title="Back">‹</button>
+      <button type="button" class="topbar-icon" onclick={goBack} title="Back">{@render icon('back')}</button>
     {:else}
       <span class="topbar-spacer"></span>
     {/if}
@@ -1072,9 +1068,9 @@
     </strong>
 
     {#if activeView === 'library' && !selectedArtist}
-      <a class="topbar-icon" href="#/settings" title="Settings">⚙</a>
+      <a class="topbar-icon" href="#/settings" title="Settings">{@render icon('settings')}</a>
     {:else}
-      <a class="topbar-icon" href="#/library" title="Home">⌂</a>
+      <a class="topbar-icon" href="#/library" title="Home">{@render icon('home')}</a>
     {/if}
   </header>
 
@@ -1102,7 +1098,7 @@
             {activeAuth ? `${activeAuth.username} · ${connectionStatusLabel()}` : 'Navidrome connection'}
           </small>
         </span>
-        <span class="connection-chevron">⌄</span>
+        <span class="connection-chevron">{@render icon('chevron-down')}</span>
       </summary>
 
       <div class="connection-details">
@@ -1188,7 +1184,7 @@
       {#if currentIndex >= 0 && queue[currentIndex] && coverArtSource(queue[currentIndex].coverArt)}
         <img src={coverArtSource(queue[currentIndex].coverArt)} alt="" />
       {:else}
-        <span>♫</span>
+        <span>{@render icon('music')}</span>
       {/if}
     </div>
     <audio
@@ -1243,11 +1239,17 @@
     </div>
 
     <div class="controls">
-      <button type="button" onclick={previousTrack} disabled={currentIndex <= 0} title="Previous">⏮</button>
+      <button type="button" onclick={previousTrack} disabled={currentIndex <= 0} title="Previous">{@render icon('previous')}</button>
       <button type="button" class="play-control" onclick={togglePlayback} disabled={queue.length === 0} title={isPlaying ? 'Pause' : 'Play'}>
-        {#if playbackLoading}{@render loadingSpinner()}{:else}{isPlaying ? 'Ⅱ' : '▶'}{/if}
+        {#if playbackLoading}
+          {@render icon('loading')}
+        {:else if isPlaying}
+          {@render icon('pause')}
+        {:else}
+          {@render icon('play')}
+        {/if}
       </button>
-      <button type="button" onclick={nextTrack} disabled={currentIndex < 0 || currentIndex + 1 >= queue.length} title="Next">⏭</button>
+      <button type="button" onclick={nextTrack} disabled={currentIndex < 0 || currentIndex + 1 >= queue.length} title="Next">{@render icon('next')}</button>
     </div>
 
       {#if playbackError}
@@ -1280,13 +1282,13 @@
                 title="Download track"
               >
                 {#if downloadingTrackIds.has(item.id) || (index === currentIndex && playbackLoading)}
-                  {@render loadingSpinner()}
+                  {@render icon('loading')}
                 {:else if index === currentIndex && isPlaying}
-                  {@render soundBars()}
+                  {@render icon('sound-bars')}
                 {:else if downloadedTrackIds.has(item.id)}
-                  ✓
+                  {@render icon('check')}
                 {:else}
-                  ↓
+                  {@render icon('download')}
                 {/if}
               </button>
             </div>
@@ -1334,11 +1336,11 @@
             title="Download album"
           >
             {#if downloadingCollection === `album:${selectedAlbum.id}`}
-              {@render loadingSpinner()}
+              {@render icon('loading')}
             {:else if collectionIsDownloaded(albumQueueItems(selectedArtist, selectedAlbum))}
-              ✓
+              {@render icon('check')}
             {:else}
-              ↓
+              {@render icon('download')}
             {/if}
           </button>
         {:else if !offlineMode && selectedArtist}
@@ -1349,11 +1351,11 @@
             title="Download artist"
           >
             {#if downloadingCollection === `artist:${selectedArtist.id ?? selectedArtist.name}`}
-              {@render loadingSpinner()}
+              {@render icon('loading')}
             {:else if collectionIsDownloaded(artistQueueItems(selectedArtist))}
-              ✓
+              {@render icon('check')}
             {:else}
-              ↓
+              {@render icon('download')}
             {/if}
           </button>
         {/if}
@@ -1361,7 +1363,7 @@
 
       {#if offlineScanning}
         <div class="empty-state">
-          <div class="scan-spinner">{@render loadingSpinner()}</div>
+          <div class="scan-spinner">{@render icon('loading')}</div>
           <p>Checking downloaded music…</p>
         </div>
       {:else if selectedArtist && selectedAlbum}
@@ -1379,16 +1381,16 @@
                 title="Download track"
               >
                 {#if downloadingTrackIds.has(track.id) || (queue[currentIndex]?.id === track.id && playbackLoading)}
-                  {@render loadingSpinner()}
+                  {@render icon('loading')}
                 {:else if queue[currentIndex]?.id === track.id && isPlaying}
-                  {@render soundBars()}
+                  {@render icon('sound-bars')}
                 {:else if downloadedTrackIds.has(track.id)}
-                  ✓
+                  {@render icon('check')}
                 {:else}
-                  ↓
+                  {@render icon('download')}
                 {/if}
               </button>
-              <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>＋</button>
+              <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>{@render icon('plus')}</button>
             </div>
           {:else}
             <div class="empty-state"><p>{offlineMode ? 'No downloaded tracks.' : 'No tracks found.'}</p></div>
@@ -1403,7 +1405,7 @@
                   {#if coverArtSource(displayedAlbumCoverArt(album))}
                     <img src={coverArtSource(displayedAlbumCoverArt(album))} alt="" loading="lazy" />
                   {:else}
-                    <span>♫</span>
+                    <span>{@render icon('music')}</span>
                   {/if}
                 </span>
                 <span class="album-copy">
@@ -1413,14 +1415,14 @@
               </a>
               <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>
                 {#if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === selectedArtist.name && playbackLoading}
-                  {@render loadingSpinner()}
+                  {@render icon('loading')}
                 {:else if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === selectedArtist.name && isPlaying}
-                  {@render soundBars()}
+                  {@render icon('sound-bars')}
                 {:else}
-                  ▶
+                  {@render icon('play')}
                 {/if}
               </button>
-              <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>＋</button>
+              <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>{@render icon('plus')}</button>
             </article>
           {:else}
             <div class="empty-state"><p>{offlineMode ? 'No downloaded albums.' : 'No albums found.'}</p></div>
@@ -1435,18 +1437,18 @@
                   {#if coverArtSource(displayedArtistCoverArt(artist))}
                     <img src={coverArtSource(displayedArtistCoverArt(artist))} alt="" loading="lazy" />
                   {:else}
-                    <span>♫</span>
+                    <span>{@render icon('music')}</span>
                   {/if}
                   <strong class="artist-name">{artist.name}</strong>
                 </span>
               </a>
               <button type="button" class="artist-play" onclick={() => playArtist(artist)}>
                 {#if queue[currentIndex]?.artist === artist.name && playbackLoading}
-                  {@render loadingSpinner()}
+                  {@render icon('loading')}
                 {:else if queue[currentIndex]?.artist === artist.name && isPlaying}
-                  {@render soundBars()}
+                  {@render icon('sound-bars')}
                 {:else}
-                  ▶
+                  {@render icon('play')}
                 {/if}
               </button>
             </article>
@@ -1454,13 +1456,13 @@
         </div>
       {:else}
         <div class="empty-state">
-          <span>♫</span>
+          <span>{@render icon('music')}</span>
           <p>{offlineMode ? 'No downloaded artists.' : 'No artists found.'}</p>
         </div>
       {/if}
     {:else if !loading}
       <div class="empty-state">
-        <span>♫</span>
+        <span>{@render icon('music')}</span>
         <h2>Connect your library</h2>
         <p>Add your Navidrome server to start listening.</p>
         <a class="primary" href="#/settings">Open settings</a>
@@ -1474,7 +1476,7 @@
         {#if coverArtSource(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
           <img src={coverArtSource(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)} alt="" />
         {:else}
-          <span>♫</span>
+          <span>{@render icon('music')}</span>
         {/if}
       </span>
       <span class="mini-copy">
@@ -1492,7 +1494,15 @@
         }}
         onkeydown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') togglePlayback();
-        }}>{#if playbackLoading}{@render loadingSpinner()}{:else}{isPlaying ? 'Ⅱ' : '▶'}{/if}</span
+        }}>
+        {#if playbackLoading}
+          {@render icon('loading')}
+        {:else if isPlaying}
+          {@render icon('pause')}
+        {:else}
+          {@render icon('play')}
+        {/if}
+      </span
       >
       <span class="mini-progress"><span style:width={`${playbackPercent()}%`}></span></span>
     </a>

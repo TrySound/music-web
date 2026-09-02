@@ -293,6 +293,12 @@ input:not([type='range']):not([type='checkbox']):focus {
   opacity: 0.5;
 }
 
+.icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -615,49 +621,6 @@ form > button,
   flex: none;
   color: #737b8b;
   text-align: right;
-}
-
-.loading-spinner {
-  display: block;
-  width: 1rem;
-  height: 1rem;
-  border: 0.15rem solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: loading-spin 550ms linear infinite;
-}
-
-@keyframes loading-spin {
-  to { transform: rotate(360deg); }
-}
-
-.sound-bars {
-  display: inline-flex;
-  height: 1rem;
-  align-items: flex-end;
-  gap: 0.14rem;
-}
-
-.sound-bars > span {
-  width: 0.16rem;
-  height: 100%;
-  border-radius: 999px;
-  background: currentColor;
-  transform-origin: bottom;
-  animation: sound-bar 350ms ease-in-out infinite alternate;
-}
-
-.sound-bars > span:nth-child(2) {
-  animation-delay: -230ms;
-}
-
-.sound-bars > span:nth-child(3) {
-  animation-delay: -115ms;
-}
-
-@keyframes sound-bar {
-  from { transform: scaleY(0.25); }
-  to { transform: scaleY(1); }
 }
 
 .row-action {
