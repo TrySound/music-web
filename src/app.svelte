@@ -743,6 +743,32 @@
 </svelte:head>
 
 <main class="app-shell">
+  <header class="topbar">
+    {#if activeView === 'library' && selectedArtist}
+      <a
+        class="topbar-icon"
+        href={selectedAlbum ? artistRoute(selectedArtist) : '#/library'}
+        title="Back"
+      >‹</a>
+    {:else}
+      <span class="topbar-spacer"></span>
+    {/if}
+
+    <strong>
+      {activeView === 'player'
+        ? 'Now playing'
+        : activeView === 'settings'
+          ? 'Settings'
+          : 'Library'}
+    </strong>
+
+    {#if activeView === 'library' && !selectedArtist}
+      <a class="topbar-icon" href="#/settings" title="Settings">⚙</a>
+    {:else}
+      <a class="topbar-icon" href="#/library" title="Home">⌂</a>
+    {/if}
+  </header>
+
   <section class="view settings-view" class:hidden={activeView !== 'settings'}>
     <span class="eyebrow">Settings</span>
     <h2>{activeAuth ? 'Music server' : 'Connect to your music'}</h2>
@@ -922,10 +948,6 @@
 
   <section class="view library-view" class:hidden={activeView !== 'library'}>
     {#if connectedHost && !error}
-      {#if selectedArtist}
-        <a class="back-button" href={selectedAlbum ? artistRoute(selectedArtist) : '#/library'}>‹ Back</a>
-      {/if}
-
       <div class="section-heading">
         <div>
           <span class="eyebrow">
@@ -934,7 +956,7 @@
           <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${artists.length} artists`}</h2>
           {#if selectedAlbum}
             <p class="library-meta">
-              {selectedAlbum.year ?? 'Unknown year'} · {selectedAlbum.tracks.length} track{selectedAlbum.tracks.length === 1 ? '' : 's'}
+              {selectedArtist?.name} · {selectedAlbum.year ?? 'Unknown year'} · {selectedAlbum.tracks.length} track{selectedAlbum.tracks.length === 1 ? '' : 's'}
             </p>
             {#if albumGenres(selectedAlbum).length > 0}
               <div class="genre-list">
@@ -1057,19 +1079,10 @@
     </a>
   {/if}
 
-  <nav class="bottom-nav">
-    <a class:active={activeView === 'library'} href="#/library">
-      <span>♫</span><small>Library</small>
-    </a>
-    <a class:active={activeView === 'settings'} href="#/settings">
-      <span>⚙</span><small>Settings</small>
-    </a>
-  </nav>
 </main>
 
 <style>
   :global(body) {
-    background: #080a0f;
     color: #f5f6f8;
   }
 
@@ -1079,8 +1092,44 @@
     max-width: 32rem;
     min-height: 100dvh;
     margin: 0 auto;
-    padding-bottom: 10.5rem;
-    background: #10131a;
+    padding-bottom: 5.5rem;
+  }
+
+  .topbar {
+    position: sticky;
+    z-index: 30;
+    top: 0;
+    display: grid;
+    min-height: 3.75rem;
+    padding: 0.55rem 0.75rem;
+    align-items: center;
+    grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+    border-bottom: 1px solid #292f3b;
+    background: rgb(16 19 26 / 94%);
+    backdrop-filter: blur(14px);
+  }
+
+  .topbar > strong {
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar-icon {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    border-radius: 50%;
+    color: #bcb4ff;
+    background: #252438;
+    font-size: 1.4rem;
+    line-height: 1;
+  }
+
+  .topbar-spacer {
+    width: 2.75rem;
   }
 
   h2,
@@ -1317,7 +1366,7 @@
 
   .player-main {
     display: flex;
-    height: calc(100dvh - 6.75rem);
+    height: calc(100dvh - 6.25rem);
     min-height: 0;
     flex-direction: column;
     justify-content: center;
@@ -1396,14 +1445,6 @@
     height: 4.2rem;
     background: #7565f6;
     font-size: 1.45rem;
-  }
-
-  .back-button {
-    display: inline-block;
-    margin-bottom: 1rem;
-    padding: 0.5rem 0.75rem;
-    color: #bcb4ff;
-    background: transparent;
   }
 
   .artist-grid {
@@ -1567,7 +1608,7 @@
   }
 
   .player-queue {
-    margin-top: 5.5rem;
+    margin-top: 1.5rem;
     padding-top: 1.25rem;
     border-top: 1px solid #272c38;
   }
@@ -1614,7 +1655,7 @@
     position: fixed;
     z-index: 20;
     right: 0.6rem;
-    bottom: 4.8rem;
+    bottom: max(0.6rem, env(safe-area-inset-bottom));
     left: 0.6rem;
     display: flex;
     max-width: 30.8rem;
@@ -1686,43 +1727,4 @@
     background: #7565f6;
   }
 
-  .bottom-nav {
-    position: fixed;
-    z-index: 20;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: grid;
-    width: 100%;
-    max-width: 32rem;
-    min-height: 4.25rem;
-    margin: 0 auto;
-    padding: 0 0 env(safe-area-inset-bottom);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    border-top: 1px solid #292f3b;
-    background: rgb(17 20 27 / 97%);
-    backdrop-filter: blur(14px);
-  }
-
-  .bottom-nav a {
-    display: grid;
-    width: 100%;
-    min-height: 4.25rem;
-    gap: 0.15rem;
-    place-items: center;
-    border-radius: 0;
-    color: #8f96a5;
-    background: transparent;
-    font-size: 1.05rem;
-  }
-
-  .bottom-nav a.active {
-    color: #bcb4ff;
-    background: #222332;
-  }
-
-  .bottom-nav small {
-    color: inherit;
-    font-size: 0.65rem;
-  }
 </style>
