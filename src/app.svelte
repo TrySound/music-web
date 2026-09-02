@@ -624,8 +624,6 @@
 
   {#if refreshError}
     <p class="error">{refreshError} Cached metadata is still being shown.</p>
-  {:else if refreshing}
-    <p>Refreshing metadata in the background…</p>
   {/if}
 
   <section class="view player-view" class:hidden={activeView !== 'player'}>
@@ -734,11 +732,6 @@
           </span>
           <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${artists.length} artists`}</h2>
         </div>
-        {#if !selectedArtist}
-          <button type="button" class="quiet" onclick={() => loadArtists(activeAuth ?? undefined)} disabled={loading || refreshing}>
-            {refreshing ? 'Checking…' : 'Refresh'}
-          </button>
-        {/if}
       </div>
 
       {#if selectedArtist && selectedAlbum}
