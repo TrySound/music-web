@@ -418,6 +418,10 @@
     scheduleQueueSave();
   }
 
+  function streamFormat(track: QueueItem) {
+    return track.contentType && audio?.canPlayType(track.contentType) ? 'raw' : 'mp3';
+  }
+
   function streamUrl(track: QueueItem) {
     if (!activeAuth) return '';
 
@@ -427,14 +431,16 @@
       t: activeAuth.token,
       s: activeAuth.salt,
       v: '1.16.1',
-      c: 'navidrome-artists'
+      c: 'navidrome-artists',
+      format: streamFormat(track),
+      estimateContentLength: 'true'
     });
     return `${activeAuth.host}/rest/stream.view?${query}`;
   }
 
   function trackCacheKey(track: QueueItem) {
     if (!activeAuth) return track.id;
-    return `${activeAuth.host}\n${activeAuth.username}\n${track.id}`;
+    return `${activeAuth.host}\n${activeAuth.username}\n${track.id}\n${streamFormat(track)}-v1`;
   }
 
   function updateTrackSet(set: Set<string>, trackId: string, add: boolean) {
@@ -682,13 +688,31 @@
     scheduleQueueSave();
 
     try {
-      const file = await ensureTrackCached(track);
+      const key = trackCacheKey(track);
+      const cached = await getCachedTrack(key).catch(() => null);
+      let cacheAfterPlaybackStarts = false;
       if (request !== playbackRequest) return;
+
       if (playbackObjectUrl) URL.revokeObjectURL(playbackObjectUrl);
-      const playableFile = track.contentType ? new Blob([file], { type: track.contentType }) : file;
-      playbackObjectUrl = URL.createObjectURL(playableFile);
-      audio.src = playbackObjectUrl;
+      playbackObjectUrl = '';
+
+      if (cached) {
+        downloadedTrackIds = updateTrackSet(downloadedTrackIds, track.id, true);
+        const contentType = streamFormat(track) === 'raw' && track.contentType
+          ? track.contentType
+          : 'audio/mpeg';
+        playbackObjectUrl = URL.createObjectURL(new Blob([cached], { type: contentType }));
+        audio.src = playbackObjectUrl;
+        void loadCachedCoverArt(track.coverArt);
+      } else {
+        audio.src = streamUrl(track);
+        cacheAfterPlaybackStarts = true;
+      }
+
       await audio.play();
+      if (cacheAfterPlaybackStarts && request === playbackRequest) {
+        void ensureTrackCached(track).catch(() => {});
+      }
     } catch (caught) {
       playbackLoading = false;
       playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
@@ -1281,10 +1305,12 @@
                 onclick={() => downloadQueueTrack(item)}
                 title="Download track"
               >
-                {#if downloadingTrackIds.has(item.id) || (index === currentIndex && playbackLoading)}
+                {#if index === currentIndex && playbackLoading}
                   {@render icon('loading')}
                 {:else if index === currentIndex && isPlaying}
                   {@render icon('sound-bars')}
+                {:else if downloadingTrackIds.has(item.id)}
+                  {@render icon('loading')}
                 {:else if downloadedTrackIds.has(item.id)}
                   {@render icon('check')}
                 {:else}
@@ -1380,10 +1406,12 @@
                 onclick={() => downloadLibraryTrack(selectedArtist!, selectedAlbum!, track)}
                 title="Download track"
               >
-                {#if downloadingTrackIds.has(track.id) || (queue[currentIndex]?.id === track.id && playbackLoading)}
+                {#if queue[currentIndex]?.id === track.id && playbackLoading}
                   {@render icon('loading')}
                 {:else if queue[currentIndex]?.id === track.id && isPlaying}
                   {@render icon('sound-bars')}
+                {:else if downloadingTrackIds.has(track.id)}
+                  {@render icon('loading')}
                 {:else if downloadedTrackIds.has(track.id)}
                   {@render icon('check')}
                 {:else}
