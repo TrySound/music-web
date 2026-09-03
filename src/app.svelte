@@ -742,7 +742,7 @@
           class:connecting={!offlineMode && connectionStatus === "connecting"}
           class:failed={!offlineMode && connectionStatus === "error"}
         ></span>
-        <span class="connection-summary">
+        <span class="connection-summary stack-xs">
           <strong>{activeAuth?.host ?? "Add a server"}</strong>
           <small>
             {activeAuth
@@ -774,8 +774,8 @@
           <h3>Edit connection</h3>
         {/if}
 
-        <form onsubmit={submitConnection}>
-          <label>
+        <form class="stack-md" onsubmit={submitConnection}>
+          <label class="stack-sm">
             Host
             <input
               type="text"
@@ -786,7 +786,7 @@
             />
           </label>
 
-          <label>
+          <label class="stack-sm">
             Username
             <input
               type="text"
@@ -796,7 +796,7 @@
             />
           </label>
 
-          <label>
+          <label class="stack-sm">
             Password
             <input
               type="password"
@@ -822,7 +822,7 @@
     </details>
 
     <div class="settings-option">
-      <div>
+      <div class="stack-xs">
         <strong>Offline library</strong>
         <small>
           {offlineScanning
@@ -1178,7 +1178,7 @@
                       <span>{@render icon("music")}</span>
                     {/if}
                   </span>
-                  <span class="album-copy">
+                  <span class="album-copy stack-xs">
                     <strong>{album.name}</strong>
                     <small>{album.year ?? "Unknown year"} · {visibleTracks.length} tracks</small>
                   </span>
@@ -1391,7 +1391,7 @@
           <span>{@render icon("music")}</span>
         {/if}
       </span>
-      <span class="mini-copy">
+      <span class="mini-copy stack-xs">
         <strong>{queue[currentIndex >= 0 ? currentIndex : 0].title}</strong>
         <small>{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small>
       </span>

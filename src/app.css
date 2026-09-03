@@ -9,6 +9,11 @@
   --weight-semibold: 600;
   --weight-bold: 700;
   --tracking-label: 0.1em;
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
   --type-heading-size: var(--text-lg);
   --type-heading-line: 1.5rem;
   --type-heading-weight: var(--weight-bold);
@@ -37,6 +42,35 @@
 
 * {
   box-sizing: border-box;
+}
+
+.stack-xs,
+.stack-sm,
+.stack-md,
+.stack-lg,
+.stack-xl {
+  display: grid;
+  grid-auto-rows: max-content;
+}
+
+.stack-xs {
+  gap: var(--space-xs);
+}
+
+.stack-sm {
+  gap: var(--space-sm);
+}
+
+.stack-md {
+  gap: var(--space-md);
+}
+
+.stack-lg {
+  gap: var(--space-lg);
+}
+
+.stack-xl {
+  gap: var(--space-xl);
 }
 
 body {
@@ -102,8 +136,9 @@ button {
 }
 
 h2,
+h3,
 p {
-  margin-top: 0;
+  margin-block: 0;
 }
 
 h2 {
@@ -147,14 +182,7 @@ strong {
   font-weight: var(--weight-semibold);
 }
 
-form,
-label {
-  display: grid;
-  gap: 0.45rem;
-}
-
 form {
-  gap: 1rem;
   margin-top: 1.5rem;
 }
 
@@ -221,7 +249,6 @@ input:not([type="range"]):not([type="checkbox"]):focus {
 }
 
 .connection-summary {
-  display: grid;
   min-width: 0;
   flex: 1;
 }
@@ -293,7 +320,6 @@ input:not([type="range"]):not([type="checkbox"]):focus {
 }
 
 .settings-option > div {
-  display: grid;
   min-width: 0;
   flex: 1;
 }
@@ -652,7 +678,6 @@ form > button,
 }
 
 .album-copy {
-  display: grid;
   min-width: 0;
 }
 
@@ -805,7 +830,6 @@ form > button,
 }
 
 .mini-copy {
-  display: grid;
   min-width: 0;
   flex: 1;
 }
