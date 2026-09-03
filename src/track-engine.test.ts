@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SubsonicClient } from "./subsonic-client";
 import { TrackEngine } from "./track-engine";
 
 const auth = {
@@ -64,7 +65,7 @@ afterEach(() => {
 describe("track engine", () => {
   it("uses the original format when the browser supports it", async () => {
     installOpfs(null, "probably");
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     const source = await engine.getSource({ id: "track-1", contentType: "audio/flac" });
 
@@ -73,7 +74,7 @@ describe("track engine", () => {
 
   it("can force MP3 when a browser rejects a reportedly supported format", async () => {
     installOpfs(null, "probably");
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     const source = await engine.getSource(
       { id: "track-1", contentType: "audio/flac" },
@@ -85,7 +86,7 @@ describe("track engine", () => {
 
   it("falls back to MP3 for unsupported formats", async () => {
     installOpfs();
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     const source = await engine.getSource({ id: "track-1", contentType: "audio/unknown" });
 
@@ -96,7 +97,7 @@ describe("track engine", () => {
     installOpfs(new File(["cached"], "track.audio"));
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cached-track");
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     const source = await engine.getSource({ id: "track-1", contentType: "audio/flac" });
 
@@ -114,7 +115,7 @@ describe("track engine", () => {
       .mockReturnValueOnce("blob:first-track")
       .mockReturnValueOnce("blob:second-track");
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     await engine.getSource({ id: "track-1", contentType: "audio/flac" });
     await engine.getSource({ id: "track-2", contentType: "audio/flac" });
@@ -126,7 +127,7 @@ describe("track engine", () => {
 
   it("returns the Navidrome URL when a track is not cached", async () => {
     installOpfs();
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     const source = await engine.getSource({ id: "track-1" });
 
@@ -137,7 +138,7 @@ describe("track engine", () => {
 
   it("loads cached track state without returning storage details", async () => {
     installOpfs(new File(["cached"], "track.audio"));
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     const result = await engine.scanCached([{ id: "track-1" }, { id: "track-2" }]);
 
@@ -151,7 +152,7 @@ describe("track engine", () => {
     vi.stubGlobal("navigator", {
       storage: { getDirectory: async () => Promise.reject(new Error("Storage unavailable")) },
     });
-    const engine = new TrackEngine({ auth });
+    const engine = new TrackEngine({ client: new SubsonicClient(auth) });
 
     await expect(engine.scanCached([{ id: "track-1" }])).resolves.toBeUndefined();
   });
@@ -165,7 +166,7 @@ describe("track engine", () => {
       return new Response("audio");
     });
     vi.stubGlobal("fetch", fetcher);
-    engine = new TrackEngine({ auth });
+    engine = new TrackEngine({ client: new SubsonicClient(auth) });
     const track = { id: "track-1" };
 
     await Promise.all([engine.cache(track), engine.cache(track)]);

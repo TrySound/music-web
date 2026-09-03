@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueueEngine } from "./queue-engine";
+import { SubsonicClient } from "./subsonic-client";
 
 const auth = {
   host: "https://music.example.com",
@@ -34,7 +35,7 @@ describe("queue engine", () => {
     );
     const engine = new QueueEngine();
 
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.status).toBe("ready"));
 
     expect(engine.current).toBe("track-1");
@@ -59,7 +60,7 @@ describe("queue engine", () => {
       .mockResolvedValue(response());
     vi.stubGlobal("fetch", fetcher);
     const engine = new QueueEngine();
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.runAllTimersAsync();
 
     engine.update({
@@ -88,7 +89,7 @@ describe("queue engine", () => {
     const engine = new QueueEngine();
 
     engine.setNetwork("offline");
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     engine.update({ tracks: [], position: 0 });
     engine.flush();
     await vi.runAllTimersAsync();

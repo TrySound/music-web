@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoverEngine, type CoverRequest } from "./cover-engine";
+import { SubsonicClient } from "./subsonic-client";
 
 const auth = {
   host: "https://music.example.com",
@@ -99,7 +100,7 @@ describe("cover engine", () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     const engine = new CoverEngine();
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     const request = { candidates: ["cover-1"], allowNetwork: true };
     const cover = engine.getCover(request);
 
@@ -121,7 +122,7 @@ describe("cover engine", () => {
     );
     vi.stubGlobal("fetch", fetcher);
     const engine = new CoverEngine();
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     const request = { candidates: ["cover-1"], allowNetwork: true };
 
     await vi.waitFor(() => expect(engine.getCover(request).source).toBe("blob:updated-cover"));
@@ -135,7 +136,7 @@ describe("cover engine", () => {
     installOpfs(true);
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fallback-cover");
     const engine = new CoverEngine();
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     const request = {
       candidates: [undefined, "album-cover", "track-cover"],
       allowNetwork: false,
@@ -151,7 +152,7 @@ describe("cover engine", () => {
     );
     vi.stubGlobal("fetch", fetcher);
     const engine = new CoverEngine();
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     const request: CoverRequest = { candidates: ["cover-1"], allowNetwork: true };
 
     let source: string | undefined;
@@ -169,7 +170,7 @@ describe("cover engine", () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     const engine = new CoverEngine();
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     const request = { candidates: ["cover-1"], allowNetwork: false };
 
     expect(engine.getCover(request).source).toBeUndefined();

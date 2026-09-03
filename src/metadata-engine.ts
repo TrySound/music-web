@@ -1,54 +1,20 @@
 import { createSubscriber } from "svelte/reactivity";
+import {
+  SubsonicClient,
+  type SubsonicAlbum,
+  type SubsonicArtist,
+  type SubsonicTrack,
+} from "./subsonic-client";
 
 const databaseName = "navidrome-artists";
 const storeName = "libraries";
 
-export interface MetadataEngineAuth {
-  host: string;
-  username: string;
-  token: string;
-  salt: string;
-}
-
-export interface Track {
-  album?: string;
-  artist?: string;
-  contentType?: string;
-  coverArt?: string;
-  discNumber?: number;
-  genre?: string;
-  genres?: { name: string }[];
-  id: string;
-  title: string;
-  track?: number;
-}
-
-export interface Album {
-  artist?: string;
-  artistId?: string;
-  coverArt?: string;
-  genre?: string;
-  genres?: { name: string }[];
-  id: string;
-  name: string;
-  tracks: Track[];
-  year?: number;
-}
-
-export interface Artist {
-  albums: Album[];
-  coverArt?: string;
-  genre?: string;
-  genres?: { name: string }[];
-  id?: string;
-  name: string;
-}
+export type Track = SubsonicTrack;
+export type Album = SubsonicAlbum & { tracks: Track[] };
+export type Artist = SubsonicArtist & { albums: Album[] };
 
 export type MetadataStatus = "idle" | "loading" | "refreshing" | "ready" | "error";
 export type MetadataNetwork = "offline" | "online";
-
-type ApiAlbum = Omit<Album, "tracks">;
-type ApiArtist = Omit<Artist, "albums">;
 
 interface LibraryRecord {
   data: Artist[];
@@ -56,24 +22,11 @@ interface LibraryRecord {
   savedAt: number;
 }
 
-interface SubsonicResponse {
-  status: string;
-  error?: { message?: string };
-  artists?: { index?: { artist?: ApiArtist[] }[] };
-  albumList2?: { album?: ApiAlbum[] };
-  album?: { song?: Track[] };
-  indexes?: { lastModified?: number | string };
-}
-
-interface SubsonicEnvelope {
-  "subsonic-response"?: SubsonicResponse;
-}
-
 export class MetadataEngine {
   #albums = new Map<string, Album>();
   #artists: Artist[] = [];
   #artistsById = new Map<string, Artist>();
-  #auth?: MetadataEngineAuth;
+  #client?: SubsonicClient;
   #error: unknown;
   #generation = 0;
   #network: MetadataNetwork = "online";
@@ -139,68 +92,35 @@ export class MetadataEngine {
     }
   }
 
-  #authQuery(auth: MetadataEngineAuth) {
-    return new URLSearchParams({
-      u: auth.username,
-      t: auth.token,
-      s: auth.salt,
-      v: "1.16.1",
-      c: "navidrome-artists",
-      f: "json",
-    });
+  async #lastModified(client: SubsonicClient, cached?: number) {
+    return (await client.getIndexes(cached)) ?? cached ?? null;
   }
 
-  async #fetch(path: string, auth: MetadataEngineAuth, query = this.#authQuery(auth)) {
-    const response = await fetch(`${auth.host}/rest/${path}.view?${query}`);
-    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
-
-    const body: SubsonicEnvelope = await response.json();
-    const result = body["subsonic-response"];
-    if (!result) throw new Error("The server returned an unexpected response.");
-    if (result.status !== "ok") {
-      throw new Error(result.error?.message || "Navidrome rejected the request.");
-    }
-    return result;
-  }
-
-  async #lastModified(auth: MetadataEngineAuth, cached?: number) {
-    const query = this.#authQuery(auth);
-    if (cached !== undefined) query.set("ifModifiedSince", String(cached));
-    const result = await this.#fetch("getIndexes", auth, query);
-    if (!result.indexes) return cached ?? null;
-    const value = Number(result.indexes.lastModified);
-    return Number.isFinite(value) ? value : null;
-  }
-
-  async #fetchAlbums(auth: MetadataEngineAuth) {
-    const albums: ApiAlbum[] = [];
+  async #fetchAlbums(client: SubsonicClient) {
+    const albums: SubsonicAlbum[] = [];
     const pageSize = 500;
 
     for (let offset = 0; ; offset += pageSize) {
-      const query = this.#authQuery(auth);
-      query.set("type", "alphabeticalByArtist");
-      query.set("size", String(pageSize));
-      query.set("offset", String(offset));
-      const result = await this.#fetch("getAlbumList2", auth, query);
-      const page = result.albumList2?.album ?? [];
+      const page = await client.getAlbumList2({
+        type: "alphabeticalByArtist",
+        size: pageSize,
+        offset,
+      });
       albums.push(...page);
       if (page.length < pageSize) return albums;
     }
   }
 
-  async #fetchTracks(auth: MetadataEngineAuth, albums: ApiAlbum[]) {
+  async #fetchTracks(client: SubsonicClient, albums: SubsonicAlbum[]) {
     const tracks = new Map<string, Track[]>();
     let nextAlbum = 0;
 
     const worker = async () => {
       while (nextAlbum < albums.length) {
         const album = albums[nextAlbum++];
-        const query = this.#authQuery(auth);
-        query.set("id", album.id);
-        const result = await this.#fetch("getAlbum", auth, query);
         tracks.set(
           album.id,
-          (result.album?.song ?? []).sort(
+          (await client.getAlbum(album.id)).sort(
             (a, b) =>
               (a.discNumber ?? 1) - (b.discNumber ?? 1) ||
               (a.track ?? Number.MAX_SAFE_INTEGER) - (b.track ?? Number.MAX_SAFE_INTEGER) ||
@@ -214,12 +134,9 @@ export class MetadataEngine {
     return tracks;
   }
 
-  async #library(auth: MetadataEngineAuth) {
-    const [artistsResult, albums] = await Promise.all([
-      this.#fetch("getArtists", auth),
-      this.#fetchAlbums(auth),
-    ]);
-    const tracks = await this.#fetchTracks(auth, albums);
+  async #library(client: SubsonicClient) {
+    const [artists, albums] = await Promise.all([client.getArtists(), this.#fetchAlbums(client)]);
+    const tracks = await this.#fetchTracks(client, albums);
     const albumsByArtistId = new Map<string, Album[]>();
     const albumsByArtistName = new Map<string, Album[]>();
 
@@ -231,8 +148,7 @@ export class MetadataEngine {
       map.set(key, [...(map.get(key) ?? []), album]);
     }
 
-    return (artistsResult.artists?.index ?? [])
-      .flatMap((index) => index.artist ?? [])
+    return artists
       .map((artist) => ({
         ...artist,
         albums:
@@ -293,11 +209,11 @@ export class MetadataEngine {
   }
 
   #reload(forceRefresh = false) {
-    const auth = this.#auth;
-    if (!auth) return;
+    const client = this.#client;
+    if (!client) return;
 
     const generation = ++this.#generation;
-    const scope = `${auth.host}\n${auth.username}`;
+    const scope = `${client.host}\n${client.username}`;
     if (scope !== this.#scope) {
       this.#scope = scope;
       this.#publish([]);
@@ -307,15 +223,10 @@ export class MetadataEngine {
     this.#warning = undefined;
     this.#update();
 
-    this.#resolve(auth, scope, generation, forceRefresh).catch(() => {});
+    this.#resolve(client, scope, generation, forceRefresh).catch(() => {});
   }
 
-  async #resolve(
-    auth: MetadataEngineAuth,
-    scope: string,
-    generation: number,
-    forceRefresh: boolean,
-  ) {
+  async #resolve(client: SubsonicClient, scope: string, generation: number, forceRefresh: boolean) {
     let existing: LibraryRecord | null = null;
     try {
       existing = await this.#loadRecord(scope).catch(() => null);
@@ -331,7 +242,7 @@ export class MetadataEngine {
         return;
       }
 
-      const lastModified = await this.#lastModified(auth, existing?.lastModified);
+      const lastModified = await this.#lastModified(client, existing?.lastModified);
       if (generation !== this.#generation) return;
       if (!forceRefresh && existing && lastModified === existing.lastModified) {
         this.#status = "ready";
@@ -339,7 +250,7 @@ export class MetadataEngine {
         return;
       }
 
-      const artists = await this.#library(auth);
+      const artists = await this.#library(client);
       if (generation !== this.#generation) return;
       await this.#saveRecord(scope, {
         data: artists,
@@ -367,15 +278,10 @@ export class MetadataEngine {
     this.#reload(true);
   }
 
-  setAuth(auth: MetadataEngineAuth) {
-    const unchanged =
-      this.#auth &&
-      this.#auth.host === auth.host &&
-      this.#auth.username === auth.username &&
-      this.#auth.token === auth.token &&
-      this.#auth.salt === auth.salt;
-    this.#auth = auth;
-    if (!unchanged) this.#reload();
+  setClient(client: SubsonicClient) {
+    if (client === this.#client) return;
+    this.#client = client;
+    this.#reload();
   }
 
   setNetwork(network: MetadataNetwork) {

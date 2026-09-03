@@ -1,11 +1,5 @@
 import { createSubscriber } from "svelte/reactivity";
-
-export interface CoverEngineAuth {
-  host: string;
-  username: string;
-  token: string;
-  salt: string;
-}
+import { SubsonicClient } from "./subsonic-client";
 
 export interface CoverRequest {
   candidates: readonly (string | undefined)[];
@@ -42,7 +36,7 @@ interface ResolvedCover {
 }
 
 export class CoverEngine {
-  #auth?: CoverEngineAuth;
+  #client?: SubsonicClient;
   #covers = new Map<string, CoverEntry>();
   #downloads = new Map<string, Promise<CacheResult>>();
   #generation = 0;
@@ -64,8 +58,8 @@ export class CoverEngine {
     return download;
   }
 
-  #cacheKey(id: string, auth: CoverEngineAuth) {
-    return `${auth.host}\n${auth.username}\n${id}`;
+  #cacheKey(id: string, client: SubsonicClient) {
+    return `${client.host}\n${client.username}\n${id}`;
   }
 
   async #cacheFileName(key: string) {
@@ -81,17 +75,8 @@ export class CoverEngine {
     return root.getDirectoryHandle("images", { create: true });
   }
 
-  #coverUrl(id: string, auth: CoverEngineAuth) {
-    const query = new URLSearchParams({
-      id,
-      u: auth.username,
-      t: auth.token,
-      s: auth.salt,
-      v: "1.16.1",
-      c: "navidrome-artists",
-      size: "500",
-    });
-    return `${auth.host}/rest/getCoverArt.view?${query}`;
+  #coverUrl(id: string, client: SubsonicClient) {
+    return client.getCoverArtUrl(id, 500);
   }
 
   async #download(key: string, url: string): Promise<CacheResult> {
@@ -190,9 +175,9 @@ export class CoverEngine {
     return url;
   }
 
-  #revalidate(id: string, cachedUrl: string, auth: CoverEngineAuth) {
+  #revalidate(id: string, cachedUrl: string, client: SubsonicClient) {
     const generation = this.#generation;
-    this.#cache(this.#cacheKey(id, auth), this.#coverUrl(id, auth))
+    this.#cache(this.#cacheKey(id, client), this.#coverUrl(id, client))
       .then((result) => {
         if (!result.changed || generation !== this.#generation) return;
 
@@ -212,24 +197,24 @@ export class CoverEngine {
   async #resolve(
     candidates: string[],
     allowNetwork: boolean,
-    auth: CoverEngineAuth,
+    client: SubsonicClient,
   ): Promise<ResolvedCover> {
     for (const id of candidates) {
       const objectUrl = this.#objectUrls.get(id);
       if (objectUrl) return { source: objectUrl };
 
-      const cached = await this.#getCached(this.#cacheKey(id, auth)).catch(() => null);
+      const cached = await this.#getCached(this.#cacheKey(id, client)).catch(() => null);
       if (cached) {
         const cachedUrl = this.#install(id, cached);
-        if (allowNetwork) this.#revalidate(id, cachedUrl, auth);
+        if (allowNetwork) this.#revalidate(id, cachedUrl, client);
         return { source: cachedUrl };
       }
     }
 
     if (allowNetwork && candidates[0]) {
-      const url = this.#coverUrl(candidates[0], auth);
+      const url = this.#coverUrl(candidates[0], client);
       return {
-        network: { cacheKey: this.#cacheKey(candidates[0], auth), url },
+        network: { cacheKey: this.#cacheKey(candidates[0], client), url },
         source: url,
       };
     }
@@ -271,9 +256,9 @@ export class CoverEngine {
     entry = { cover, generation: this.#generation };
     this.#covers.set(key, entry);
 
-    const auth = this.#auth;
-    if (auth) {
-      this.#resolve(candidates, request.allowNetwork, auth)
+    const client = this.#client;
+    if (client) {
+      this.#resolve(candidates, request.allowNetwork, client)
         .then((resolved) => {
           if (entry.generation !== this.#generation || resolved.source === undefined) return;
           entry.network = resolved.network;
@@ -285,11 +270,12 @@ export class CoverEngine {
     return cover;
   }
 
-  setAuth(auth: CoverEngineAuth) {
+  setClient(client: SubsonicClient) {
     const accountChanged =
-      this.#auth && (this.#auth.host !== auth.host || this.#auth.username !== auth.username);
+      this.#client &&
+      (this.#client.host !== client.host || this.#client.username !== client.username);
     if (accountChanged) this.#releaseObjectUrls();
-    this.#auth = auth;
+    this.#client = client;
     this.#generation += 1;
     this.#covers.clear();
     this.#update();

@@ -1,11 +1,5 @@
 import { createSubscriber } from "svelte/reactivity";
-
-export interface QueueEngineAuth {
-  host: string;
-  username: string;
-  token: string;
-  salt: string;
-}
+import { SubsonicClient } from "./subsonic-client";
 
 export interface QueueTrack {
   album: string;
@@ -25,27 +19,8 @@ export interface QueueState {
 export type QueueEngineStatus = "idle" | "loading" | "ready" | "saving" | "error";
 export type QueueNetwork = "offline" | "online";
 
-type RemoteTrack = Omit<QueueTrack, "album" | "artist"> & {
-  album?: string;
-  artist?: string;
-};
-
-interface SubsonicResponse {
-  status: string;
-  error?: { message?: string };
-  playQueue?: {
-    current?: string;
-    entry?: RemoteTrack[];
-    position?: number;
-  };
-}
-
-interface SubsonicEnvelope {
-  "subsonic-response"?: SubsonicResponse;
-}
-
 export class QueueEngine {
-  #auth?: QueueEngineAuth;
+  #client?: SubsonicClient;
   #current?: string;
   #error: unknown;
   #generation = 0;
@@ -102,45 +77,22 @@ export class QueueEngine {
     };
   }
 
-  #query(auth: QueueEngineAuth) {
-    return new URLSearchParams({
-      u: auth.username,
-      t: auth.token,
-      s: auth.salt,
-      v: "1.16.1",
-      c: "navidrome-artists",
-      f: "json",
-    });
-  }
-
-  async #response(response: Response) {
-    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
-    const body: SubsonicEnvelope = await response.json();
-    const result = body["subsonic-response"];
-    if (!result) throw new Error("The server returned an unexpected response.");
-    if (result.status !== "ok") {
-      throw new Error(result.error?.message || "Navidrome rejected the request.");
-    }
-    return result;
-  }
-
   #load() {
-    const auth = this.#auth;
-    if (!auth || this.#network === "offline") return;
+    const client = this.#client;
+    if (!client || this.#network === "offline") return;
 
     const generation = ++this.#generation;
     this.#error = undefined;
     this.#status = "loading";
     this.#update();
-    fetch(`${auth.host}/rest/getPlayQueue.view?${this.#query(auth)}`)
-      .then((response) => this.#response(response))
-      .then((result) => {
+    client
+      .getPlayQueue()
+      .then((queue) => {
         if (generation !== this.#generation) return;
-        const queue = result.playQueue;
         this.#publish({
-          current: queue?.current,
-          position: (queue?.position ?? 0) / 1000,
-          tracks: (queue?.entry ?? []).map((track) => ({
+          current: queue.current,
+          position: queue.position,
+          tracks: queue.tracks.map((track) => ({
             album: track.album ?? "Unknown album",
             artist: track.artist ?? "Unknown artist",
             contentType: track.contentType,
@@ -161,30 +113,20 @@ export class QueueEngine {
   }
 
   async #save(state: QueueState) {
-    const auth = this.#auth;
-    if (!auth || this.#network === "offline") return;
+    const client = this.#client;
+    if (!client || this.#network === "offline") return;
 
     const generation = this.#generation;
-    const query = this.#query(auth);
-    for (const track of state.tracks) query.append("id", track.id);
-    if (state.current) {
-      query.set("current", state.current);
-      query.set("position", String(Math.round(state.position * 1000)));
-    }
 
     this.#error = undefined;
     this.#status = "saving";
     this.#update();
     try {
-      const result = await this.#response(
-        await fetch(`${auth.host}/rest/savePlayQueue.view`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: query,
-          keepalive: true,
-        }),
-      );
-      if (result.status !== "ok") throw new Error("The queue could not be synchronized.");
+      await client.savePlayQueue({
+        current: state.current,
+        position: state.position,
+        tracks: [...state.tracks],
+      });
       if (generation !== this.#generation) return;
       this.#status = "ready";
     } catch (error) {
@@ -220,15 +162,10 @@ export class QueueEngine {
     this.#save(this.#state()).catch(() => {});
   }
 
-  setAuth(auth: QueueEngineAuth) {
-    const unchanged =
-      this.#auth &&
-      this.#auth.host === auth.host &&
-      this.#auth.username === auth.username &&
-      this.#auth.token === auth.token &&
-      this.#auth.salt === auth.salt;
-    this.#auth = auth;
-    if (!unchanged) this.#load();
+  setClient(client: SubsonicClient) {
+    if (client === this.#client) return;
+    this.#client = client;
+    this.#load();
   }
 
   setNetwork(network: QueueNetwork) {

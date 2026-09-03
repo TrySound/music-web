@@ -10,6 +10,7 @@
   } from "./metadata-engine";
   import { QueueEngine, type QueueTrack } from "./queue-engine";
   import { type RouteParams } from "./router-engine";
+  import { SubsonicClient } from "./subsonic-client";
   import Router, { type RouteControls, type RouterNavigate } from "./router.svelte";
   import { TrackEngine } from "./track-engine";
 
@@ -36,6 +37,7 @@
   let artists = $derived(metadataEngine.getArtists());
   let queue = $derived(queueEngine.tracks);
   let activeAuth = $state<SavedAuth | null>(null);
+  let activeClient = $state<SubsonicClient>();
   let currentIndex = $derived(
     queueEngine.current
       ? queue.findIndex((track) => track.id === queueEngine.current)
@@ -63,6 +65,7 @@
   let connectionStatus = $state<ConnectionStatus>("disconnected");
   let connectionOpen = $state(false);
   let pendingAuth = $state<SavedAuth | null>(null);
+  let pendingClient = $state<SubsonicClient>();
   let navigateAfterConnection = $state(false);
 
   $effect(() => {
@@ -121,8 +124,6 @@
       }
 
       activeAuth = savedAuth;
-      coverEngine.setAuth(savedAuth);
-      trackEngine.setAuth(savedAuth);
       host = savedAuth.host;
       username = savedAuth.username;
       loadArtists(savedAuth);
@@ -646,15 +647,26 @@
       const salt = savedAuth?.salt ?? createSalt();
       const token = savedAuth?.token ?? md5(password + salt);
       const credentials = { host: server, username: requestUsername, token, salt };
+      const client =
+        activeAuth &&
+        activeClient &&
+        activeAuth.host === credentials.host &&
+        activeAuth.username === credentials.username &&
+        activeAuth.token === credentials.token &&
+        activeAuth.salt === credentials.salt
+          ? activeClient
+          : new SubsonicClient(credentials);
 
       pendingAuth = credentials;
+      pendingClient = client;
       const network = offlineMode ? "offline" : "online";
       metadataEngine.setNetwork(network);
       queueEngine.setNetwork(network);
-      metadataEngine.setAuth(credentials);
+      metadataEngine.setClient(client);
       if (forceRefresh) metadataEngine.refresh();
     } catch (caught) {
       pendingAuth = null;
+      pendingClient = undefined;
       connectionStatus = "error";
       error = connectionError(caught);
     }
@@ -662,10 +674,12 @@
 
   $effect(() => {
     const credentials = pendingAuth;
+    const client = pendingClient;
     const status = metadataEngine.status;
-    if (!credentials || (status !== "ready" && status !== "error")) return;
+    if (!credentials || !client || (status !== "ready" && status !== "error")) return;
 
     pendingAuth = null;
+    pendingClient = undefined;
     if (status === "error") {
       connectionStatus = "error";
       error = connectionError(metadataEngine.error);
@@ -673,9 +687,10 @@
     }
 
     activeAuth = credentials;
-    coverEngine.setAuth(credentials);
-    queueEngine.setAuth(credentials);
-    trackEngine.setAuth(credentials);
+    activeClient = client;
+    coverEngine.setClient(client);
+    queueEngine.setClient(client);
+    trackEngine.setClient(client);
     connectedHost = credentials.host;
 
     if (metadataEngine.warning) {

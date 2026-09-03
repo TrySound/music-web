@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MetadataEngine } from "./metadata-engine";
+import { SubsonicClient } from "./subsonic-client";
 
 const auth = {
   host: "https://music.example.com",
@@ -72,7 +73,7 @@ describe("metadata engine", () => {
     const engine = new MetadataEngine();
 
     engine.setNetwork("offline");
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.status).toBe("ready"));
 
     expect(engine.getArtists()).toEqual([artist]);
@@ -90,7 +91,7 @@ describe("metadata engine", () => {
     });
     const engine = new MetadataEngine();
     engine.setNetwork("offline");
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.status).toBe("ready"));
 
     expect(engine.getArtists()).toEqual([{ id: "artist-1", name: "Artist", albums: [album] }]);
@@ -111,7 +112,7 @@ describe("metadata engine", () => {
     const engine = new MetadataEngine();
 
     engine.setNetwork("offline");
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.status).toBe("error"));
     expect(engine.error).toBeInstanceOf(Error);
   });
@@ -122,7 +123,7 @@ describe("metadata engine", () => {
     vi.stubGlobal("fetch", fetcher);
     const engine = new MetadataEngine();
 
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.status).toBe("ready"));
 
     expect(engine.getArtists()).toEqual([artist]);
@@ -144,7 +145,7 @@ describe("metadata engine", () => {
     vi.stubGlobal("fetch", fetcher);
     const engine = new MetadataEngine();
 
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.status).toBe("ready"));
 
     expect(engine.getArtists()).toEqual([artist]);
@@ -159,7 +160,7 @@ describe("metadata engine", () => {
     );
     const engine = new MetadataEngine();
 
-    engine.setAuth(auth);
+    engine.setClient(new SubsonicClient(auth));
     await vi.waitFor(() => expect(engine.warning).toBeInstanceOf(Error));
 
     expect(engine.getArtists()).toEqual([artist]);

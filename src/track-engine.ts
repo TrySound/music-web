@@ -1,11 +1,5 @@
 import { createSubscriber } from "svelte/reactivity";
-
-export interface TrackEngineAuth {
-  host: string;
-  username: string;
-  token: string;
-  salt: string;
-}
+import { SubsonicClient } from "./subsonic-client";
 
 export interface EngineTrack {
   id: string;
@@ -24,7 +18,7 @@ export interface TrackSourceOptions {
 export type TrackStatus = "idle" | "downloading" | "downloaded";
 
 export interface TrackEngineOptions {
-  auth?: TrackEngineAuth;
+  client?: SubsonicClient;
 }
 
 interface StreamDescriptor {
@@ -40,7 +34,7 @@ interface TrackStore {
 
 export class TrackEngine {
   #activeObjectUrl = "";
-  #auth?: TrackEngineAuth;
+  #client?: SubsonicClient;
   #downloads = new Map<string, Promise<File>>();
   #statuses = new Map<string, TrackStatus>();
   #mediaProbe = document.createElement("audio");
@@ -55,7 +49,7 @@ export class TrackEngine {
   });
 
   constructor(options: TrackEngineOptions = {}) {
-    this.#auth = options.auth;
+    this.#client = options.client;
     this.#store = new OpfsTrackStore();
   }
 
@@ -66,7 +60,8 @@ export class TrackEngine {
   }
 
   #describe(track: EngineTrack, options: TrackSourceOptions = {}): StreamDescriptor {
-    if (!this.#auth) throw new Error("No active Navidrome connection.");
+    const client = this.#client;
+    if (!client) throw new Error("No active Subsonic connection.");
 
     const format =
       !options.forceTranscode &&
@@ -75,21 +70,13 @@ export class TrackEngine {
         ? "raw"
         : "mp3";
     const contentType = format === "raw" && track.contentType ? track.contentType : "audio/mpeg";
-    const query = new URLSearchParams({
-      id: track.id,
-      u: this.#auth.username,
-      t: this.#auth.token,
-      s: this.#auth.salt,
-      v: "1.16.1",
-      c: "navidrome-artists",
-      format,
-      estimateContentLength: "true",
-    });
-
     return {
-      cacheKey: `${this.#auth.host}\n${this.#auth.username}\n${track.id}\n${format}-v1`,
+      cacheKey: `${client.host}\n${client.username}\n${track.id}\n${format}-v1`,
       contentType,
-      url: `${this.#auth.host}/rest/stream.view?${query}`,
+      url: client.getStreamUrl(track.id, {
+        format,
+        estimateContentLength: true,
+      }),
     };
   }
 
@@ -177,10 +164,11 @@ export class TrackEngine {
     this.#clearObjectUrl();
   }
 
-  setAuth(auth: TrackEngineAuth) {
+  setClient(client: SubsonicClient) {
     const accountChanged =
-      this.#auth && (this.#auth.host !== auth.host || this.#auth.username !== auth.username);
-    this.#auth = auth;
+      this.#client &&
+      (this.#client.host !== client.host || this.#client.username !== client.username);
+    this.#client = client;
     if (accountChanged) {
       this.#statuses.clear();
       this.#update();
