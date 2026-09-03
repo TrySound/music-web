@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { md5 } from "js-md5";
   import { onDestroy, onMount, untrack } from "svelte";
+  import { AuthStore } from "./auth";
   import { CoverEngine } from "./cover-engine";
   import {
     MetadataEngine,
@@ -10,21 +10,16 @@
   } from "./metadata-engine";
   import { QueueEngine, type QueueTrack } from "./queue-engine";
   import { type RouteParams } from "./router-engine";
-  import { SubsonicClient } from "./subsonic-client";
+  import { SubsonicClient, type SubsonicAuth } from "./subsonic-client";
   import Router, { type RouteControls, type RouterNavigate } from "./router.svelte";
   import { TrackEngine } from "./track-engine";
 
-  const authStorageKey = "navidrome-auth";
   const offlineModeStorageKey = "navidrome-offline-mode";
+  const authStore = new AuthStore();
 
   type QueueItem = QueueTrack;
 
-  interface SavedAuth {
-    host: string;
-    username: string;
-    token: string;
-    salt: string;
-  }
+  type SavedAuth = SubsonicAuth;
 
   type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -73,30 +68,6 @@
     untrack(() => void refreshDownloadedState([...tracks]));
   });
 
-  function normalizeHost(value: string) {
-    const withProtocol = /^https?:\/\//i.test(value)
-      ? value
-      : `https://${value}`;
-    const url = new URL(withProtocol);
-    return url.toString().replace(/\/$/, "");
-  }
-
-  function createSalt() {
-    const bytes = crypto.getRandomValues(new Uint8Array(12));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-      "",
-    );
-  }
-
-  function isSavedAuth(value: unknown): value is SavedAuth {
-    if (!value || typeof value !== "object") return false;
-
-    const auth = value as Record<string, unknown>;
-    return ["host", "username", "token", "salt"].every(
-      (key) => typeof auth[key] === "string" && auth[key].length > 0,
-    );
-  }
-
   onDestroy(() => {
     coverEngine.destroy();
     metadataEngine.destroy();
@@ -108,16 +79,8 @@
     offlineMode = localStorage.getItem(offlineModeStorageKey) === "true";
 
     try {
-      const value = localStorage.getItem(authStorageKey);
-      if (!value) {
-        connectionOpen = true;
-        navigate("/settings", "replace");
-        return;
-      }
-
-      const savedAuth: unknown = JSON.parse(value);
-      if (!isSavedAuth(savedAuth)) {
-        localStorage.removeItem(authStorageKey);
+      const savedAuth = authStore.load();
+      if (!savedAuth) {
         connectionOpen = true;
         navigate("/settings", "replace");
         return;
@@ -128,7 +91,7 @@
       username = savedAuth.username;
       loadArtists(savedAuth);
     } catch {
-      localStorage.removeItem(authStorageKey);
+      authStore.clear();
       connectionOpen = true;
       navigate("/settings", "replace");
     }
@@ -642,11 +605,8 @@
     refreshError = "";
 
     try {
-      const server = normalizeHost(savedAuth?.host ?? host.trim());
-      const requestUsername = savedAuth?.username ?? username;
-      const salt = savedAuth?.salt ?? createSalt();
-      const token = savedAuth?.token ?? md5(password + salt);
-      const credentials = { host: server, username: requestUsername, token, salt };
+      const credentials =
+        savedAuth ?? authStore.create({ host, username, password });
       const client =
         activeAuth &&
         activeClient &&
@@ -701,7 +661,7 @@
       scanOfflineLibrary().catch(() => {});
     } else {
       connectionStatus = "connected";
-      localStorage.setItem(authStorageKey, JSON.stringify(credentials));
+      authStore.save(credentials);
     }
 
     if (navigateAfterConnection) {
