@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { cacheImage, getCachedImage } from './image-cache';
   import { loadLibraryCache, saveLibraryCache } from './library-cache';
-  import { cacheTrack, getCachedTrack } from './track-cache';
+  import { TrackEngine } from './track-engine';
 
   const authStorageKey = 'navidrome-auth';
   const offlineModeStorageKey = 'navidrome-offline-mode';
@@ -103,14 +103,12 @@
   let playbackLoading = false;
   let playbackError = '';
   let audio: HTMLAudioElement;
+  const trackEngine = new TrackEngine();
   let pendingSeek = 0;
   let loadedQueueKey = '';
   let queueSaveTimer: ReturnType<typeof setTimeout> | undefined;
   let lastPositionSync = 0;
-  let playbackObjectUrl = '';
   let playbackRequest = 0;
-  let downloadingTrackIds = new Set<string>();
-  let downloadedTrackIds = new Set<string>();
   let downloadedCacheKey = '';
   let downloadingCollection = '';
   let offlineMode = false;
@@ -211,6 +209,8 @@
     return () => window.navigation.removeEventListener('navigate', handleNavigation);
   });
 
+  onMount(() => () => trackEngine.destroy());
+
   onMount(() => {
     offlineMode = localStorage.getItem(offlineModeStorageKey) === 'true';
 
@@ -231,6 +231,7 @@
       }
 
       activeAuth = savedAuth;
+      trackEngine.setAuth(savedAuth);
       host = savedAuth.host;
       username = savedAuth.username;
       void loadArtists(savedAuth);
@@ -362,7 +363,7 @@
 
   function visibleTracks(album: Album) {
     return offlineMode
-      ? album.tracks.filter((track) => downloadedTrackIds.has(track.id))
+      ? album.tracks.filter((track) => trackEngine.getStatus(track.id) === 'downloaded')
       : album.tracks;
   }
 
@@ -379,7 +380,7 @@
   }
 
   function availableQueueItems(items: QueueItem[]) {
-    return offlineMode ? items.filter((track) => downloadedTrackIds.has(track.id)) : items;
+    return offlineMode ? items.filter((track) => trackEngine.getStatus(track.id) === 'downloaded') : items;
   }
 
   function trackQueueItem(artist: Artist, album: Album, track: Track): QueueItem {
@@ -413,60 +414,17 @@
   }
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
-    if (offlineMode && !downloadedTrackIds.has(track.id)) return;
+    if (offlineMode && trackEngine.getStatus(track.id) !== 'downloaded') return;
     queue = [...queue, trackQueueItem(artist, album, track)];
     scheduleQueueSave();
   }
 
-  function streamFormat(track: QueueItem) {
-    return track.contentType && audio?.canPlayType(track.contentType) ? 'raw' : 'mp3';
-  }
-
-  function streamUrl(track: QueueItem) {
-    if (!activeAuth) return '';
-
-    const query = new URLSearchParams({
-      id: track.id,
-      u: activeAuth.username,
-      t: activeAuth.token,
-      s: activeAuth.salt,
-      v: '1.16.1',
-      c: 'navidrome-artists',
-      format: streamFormat(track),
-      estimateContentLength: 'true'
-    });
-    return `${activeAuth.host}/rest/stream.view?${query}`;
-  }
-
-  function trackCacheKey(track: QueueItem) {
-    if (!activeAuth) return track.id;
-    return `${activeAuth.host}\n${activeAuth.username}\n${track.id}\n${streamFormat(track)}-v1`;
-  }
-
-  function updateTrackSet(set: Set<string>, trackId: string, add: boolean) {
-    const next = new Set(set);
-    if (add) next.add(trackId);
-    else next.delete(trackId);
-    return next;
-  }
-
   async function ensureTrackCached(track: QueueItem) {
-    const source = streamUrl(track);
-    if (!source) throw new Error('No active Navidrome connection.');
-
-    downloadingTrackIds = updateTrackSet(downloadingTrackIds, track.id, true);
-    try {
-      const key = trackCacheKey(track);
-      const trackFile = getCachedTrack(key).then((cached) => cached ?? cacheTrack(key, source));
-      const [file] = await Promise.all([
-        trackFile,
-        ensureCoverArtCached(track.coverArt).catch(() => {})
-      ]);
-      downloadedTrackIds = updateTrackSet(downloadedTrackIds, track.id, true);
-      return file;
-    } finally {
-      downloadingTrackIds = updateTrackSet(downloadingTrackIds, track.id, false);
-    }
+    const [file] = await Promise.all([
+      trackEngine.cache(track),
+      ensureCoverArtCached(track.coverArt).catch(() => {})
+    ]);
+    return file;
   }
 
   async function downloadQueueTrack(track: QueueItem) {
@@ -516,25 +474,7 @@
 
   async function refreshDownloadedState(items: QueueItem[]) {
     if (!activeAuth) return;
-
-    let nextTrack = 0;
-    const cachedIds: string[] = [];
-
-    async function worker() {
-      while (nextTrack < items.length) {
-        const track = items[nextTrack++];
-        try {
-          if (await getCachedTrack(trackCacheKey(track))) cachedIds.push(track.id);
-        } catch {
-          return;
-        }
-      }
-    }
-
-    await Promise.all(Array.from({ length: Math.min(8, items.length) }, () => worker()));
-    if (cachedIds.length > 0) {
-      downloadedTrackIds = new Set([...downloadedTrackIds, ...cachedIds]);
-    }
+    await trackEngine.scanCached(items);
   }
 
   async function scanOfflineLibrary() {
@@ -544,7 +484,6 @@
     try {
       const cacheKey = `${activeAuth.host}\n${activeAuth.username}`;
       if (downloadedCacheKey !== cacheKey) {
-        downloadedTrackIds = new Set();
         clearCoverArtObjectUrls();
         downloadedCacheKey = cacheKey;
       }
@@ -555,7 +494,7 @@
       const coverArtIds = [
         ...new Set(
           libraryTracks
-            .filter((track) => downloadedTrackIds.has(track.id))
+            .filter((track) => trackEngine.getStatus(track.id) === 'downloaded')
             .map((track) => track.coverArt)
             .filter((id): id is string => Boolean(id))
         )
@@ -563,7 +502,7 @@
       await Promise.all(coverArtIds.map(loadCachedCoverArt));
 
       const currentTrackId = queue[currentIndex]?.id;
-      const offlineQueue = queue.filter((track) => downloadedTrackIds.has(track.id));
+      const offlineQueue = queue.filter((track) => trackEngine.getStatus(track.id) === 'downloaded');
       const offlineIndex = currentTrackId
         ? offlineQueue.findIndex((track) => track.id === currentTrackId)
         : -1;
@@ -589,7 +528,7 @@
   }
 
   function collectionIsDownloaded(items: QueueItem[]) {
-    return items.length > 0 && items.every((track) => downloadedTrackIds.has(track.id));
+    return items.length > 0 && items.every((track) => trackEngine.getStatus(track.id) === 'downloaded');
   }
 
   async function loadServerQueue(server: string, authQuery: URLSearchParams) {
@@ -688,32 +627,18 @@
     scheduleQueueSave();
 
     try {
-      const key = trackCacheKey(track);
-      const cached = await getCachedTrack(key).catch(() => null);
-      let cacheAfterPlaybackStarts = false;
+      const source = await trackEngine.getSource(track);
       if (request !== playbackRequest) return;
 
-      if (playbackObjectUrl) URL.revokeObjectURL(playbackObjectUrl);
-      playbackObjectUrl = '';
-
-      if (cached) {
-        downloadedTrackIds = updateTrackSet(downloadedTrackIds, track.id, true);
-        const contentType = streamFormat(track) === 'raw' && track.contentType
-          ? track.contentType
-          : 'audio/mpeg';
-        playbackObjectUrl = URL.createObjectURL(new Blob([cached], { type: contentType }));
-        audio.src = playbackObjectUrl;
-        void loadCachedCoverArt(track.coverArt);
-      } else {
-        audio.src = streamUrl(track);
-        cacheAfterPlaybackStarts = true;
-      }
+      audio.src = source.url;
+      if (source.cached) void loadCachedCoverArt(track.coverArt);
 
       await audio.play();
-      if (cacheAfterPlaybackStarts && request === playbackRequest) {
+      if (!source.cached && request === playbackRequest) {
         void ensureTrackCached(track).catch(() => {});
       }
     } catch (caught) {
+      if (request !== playbackRequest) return;
       playbackLoading = false;
       playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
     }
@@ -724,8 +649,7 @@
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
-    if (playbackObjectUrl) URL.revokeObjectURL(playbackObjectUrl);
-    playbackObjectUrl = '';
+    trackEngine.releaseSource();
     currentIndex = -1;
     currentTime = 0;
     duration = 0;
@@ -1010,6 +934,7 @@
 
       if (offlineMode) {
         activeAuth = credentials;
+        trackEngine.setAuth(credentials);
         connectionStatus = 'disconnected';
         if (!cached) throw new Error('No cached library is available offline.');
         await scanOfflineLibrary();
@@ -1018,11 +943,11 @@
 
       const lastModified = await getLastModified(server, query, cached?.lastModified);
       activeAuth = credentials;
+      trackEngine.setAuth(credentials);
       connectionStatus = 'connected';
       localStorage.setItem(authStorageKey, JSON.stringify(credentials));
 
       if (loadedQueueKey !== cacheKey) {
-        downloadedTrackIds = new Set();
         clearCoverArtObjectUrls();
         downloadedCacheKey = cacheKey;
         try {
@@ -1309,9 +1234,9 @@
                   {@render icon('loading')}
                 {:else if index === currentIndex && isPlaying}
                   {@render icon('sound-bars')}
-                {:else if downloadingTrackIds.has(item.id)}
+                {:else if trackEngine.getStatus(item.id) === 'downloading'}
                   {@render icon('loading')}
-                {:else if downloadedTrackIds.has(item.id)}
+                {:else if trackEngine.getStatus(item.id) === 'downloaded'}
                   {@render icon('check')}
                 {:else}
                   {@render icon('download')}
@@ -1410,9 +1335,9 @@
                   {@render icon('loading')}
                 {:else if queue[currentIndex]?.id === track.id && isPlaying}
                   {@render icon('sound-bars')}
-                {:else if downloadingTrackIds.has(track.id)}
+                {:else if trackEngine.getStatus(track.id) === 'downloading'}
                   {@render icon('loading')}
-                {:else if downloadedTrackIds.has(track.id)}
+                {:else if trackEngine.getStatus(track.id) === 'downloaded'}
                   {@render icon('check')}
                 {:else}
                   {@render icon('download')}
