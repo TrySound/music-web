@@ -8,33 +8,13 @@
     type Artist,
     type Track,
   } from "./metadata-engine";
+  import { QueueEngine, type QueueTrack } from "./queue-engine";
   import { TrackEngine } from "./track-engine";
 
   const authStorageKey = "navidrome-auth";
   const offlineModeStorageKey = "navidrome-offline-mode";
 
-  interface QueueItem {
-    album: string;
-    artist: string;
-    contentType?: string;
-    coverArt?: string;
-    id: string;
-    title: string;
-  }
-
-  interface SubsonicResponse {
-    status: string;
-    error?: { message?: string };
-    playQueue?: {
-      current?: string;
-      entry?: Track[];
-      position?: number;
-    };
-  }
-
-  interface SubsonicEnvelope {
-    "subsonic-response"?: SubsonicResponse;
-  }
+  type QueueItem = QueueTrack;
 
   interface SavedAuth {
     host: string;
@@ -53,11 +33,16 @@
   let username = $state("");
   let password = $state("");
   const metadataEngine = new MetadataEngine();
+  const queueEngine = new QueueEngine();
   let artists = $derived(metadataEngine.getArtists());
-  let queue = $state<QueueItem[]>([]);
+  let queue = $derived(queueEngine.tracks);
   let activeAuth = $state<SavedAuth | null>(null);
-  let currentIndex = $state(-1);
-  let currentTime = $state(0);
+  let currentIndex = $derived(
+    queueEngine.current
+      ? queue.findIndex((track) => track.id === queueEngine.current)
+      : -1,
+  );
+  let currentTime = $derived(queueEngine.position);
   let duration = $state(0);
   let isPlaying = $state(false);
   let playbackLoading = $state(false);
@@ -65,9 +50,6 @@
   let audio: HTMLAudioElement;
   const coverEngine = new CoverEngine();
   const trackEngine = new TrackEngine();
-  let pendingSeek = 0;
-  let loadedQueueKey = "";
-  let queueSaveTimer: ReturnType<typeof setTimeout> | undefined;
   let lastPositionSync = 0;
   let playbackRequest = 0;
   let downloadingCollection = $state("");
@@ -88,6 +70,11 @@
     if (status === "refreshing" || status === "ready") {
       untrack(syncCurrentRoute);
     }
+  });
+
+  $effect(() => {
+    const tracks = queueEngine.tracks;
+    untrack(() => void refreshDownloadedState([...tracks]));
   });
 
   function normalizeHost(value: string) {
@@ -198,6 +185,7 @@
   onDestroy(() => {
     coverEngine.destroy();
     metadataEngine.destroy();
+    queueEngine.destroy();
     trackEngine.destroy();
   });
 
@@ -235,7 +223,7 @@
 
   onMount(() => {
     const saveWhenHidden = () => {
-      if (document.visibilityState === "hidden") void saveServerQueue();
+      if (document.visibilityState === "hidden") queueEngine.flush();
     };
 
     document.addEventListener("visibilitychange", saveWhenHidden);
@@ -382,8 +370,11 @@
   }
 
   function addAlbumToQueue(artist: Artist, album: Album) {
-    queue = [...queue, ...availableQueueItems(albumQueueItems(artist, album))];
-    scheduleQueueSave();
+    queueEngine.update({
+      current: queueEngine.current,
+      position: currentTime,
+      tracks: [...queue, ...availableQueueItems(albumQueueItems(artist, album))],
+    });
   }
 
   function playArtist(artist: Artist) {
@@ -398,8 +389,11 @@
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
     if (offlineMode && trackEngine.getStatus(track.id) !== "downloaded") return;
-    queue = [...queue, trackQueueItem(artist, album, track)];
-    scheduleQueueSave();
+    queueEngine.update({
+      current: queueEngine.current,
+      position: currentTime,
+      tracks: [...queue, trackQueueItem(artist, album, track)],
+    });
   }
 
   async function downloadQueueTrack(track: QueueItem) {
@@ -474,8 +468,11 @@
         : -1;
 
       if (currentTrackId && offlineIndex < 0) stopPlayback();
-      queue = offlineQueue;
-      currentIndex = offlineIndex;
+      queueEngine.update({
+        current: offlineIndex >= 0 ? currentTrackId : undefined,
+        position: offlineIndex >= 0 ? currentTime : 0,
+        tracks: offlineQueue,
+      });
       syncCurrentRoute();
     } finally {
       offlineScanning = false;
@@ -486,12 +483,11 @@
     offlineMode = enabled;
     localStorage.setItem(offlineModeStorageKey, String(enabled));
 
-    metadataEngine.setNetwork(enabled ? "offline" : "online");
+    const network = enabled ? "offline" : "online";
+    metadataEngine.setNetwork(network);
+    queueEngine.setNetwork(network);
     if (enabled) await scanOfflineLibrary();
-    else if (activeAuth) {
-      loadedQueueKey = "";
-      loadArtists(activeAuth);
-    }
+    else if (activeAuth) loadArtists(activeAuth);
   }
 
   function collectionIsDownloaded(items: QueueItem[]) {
@@ -501,96 +497,22 @@
     );
   }
 
-  async function loadServerQueue(server: string, authQuery: URLSearchParams) {
-    const response = await fetch(
-      `${server}/rest/getPlayQueue.view?${authQuery}`,
-    );
-    if (!response.ok)
-      throw new Error(`The server returned HTTP ${response.status}.`);
-
-    const body: SubsonicEnvelope = await response.json();
-    const result = body["subsonic-response"];
-    if (!result) throw new Error("The server returned an unexpected response.");
-    if (result.status !== "ok") {
-      throw new Error(
-        result.error?.message || "Navidrome rejected the request.",
-      );
-    }
-
-    const playQueue = result.playQueue;
-    queue = (playQueue?.entry ?? []).map((track) => ({
-      album: track.album ?? "Unknown album",
-      artist: track.artist ?? "Unknown artist",
-      contentType: track.contentType,
-      coverArt: track.coverArt,
-      id: track.id,
-      title: track.title,
-    }));
-    currentIndex = playQueue?.current
-      ? queue.findIndex((track) => track.id === playQueue.current)
-      : -1;
-    void refreshDownloadedState(queue);
-
-    if (currentIndex >= 0) pendingSeek = (playQueue?.position ?? 0) / 1000;
-  }
-
-  async function saveServerQueue() {
-    if (!activeAuth || offlineMode) return;
-
-    const query = new URLSearchParams({
-      u: activeAuth.username,
-      t: activeAuth.token,
-      s: activeAuth.salt,
-      v: "1.16.1",
-      c: "navidrome-artists",
-      f: "json",
-    });
-    for (const track of queue) query.append("id", track.id);
-
-    if (currentIndex >= 0 && queue[currentIndex]) {
-      query.set("current", queue[currentIndex].id);
-      query.set("position", String(Math.round(audio.currentTime * 1000)));
-    }
-
-    try {
-      const response = await fetch(
-        `${activeAuth.host}/rest/savePlayQueue.view`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: query,
-          keepalive: true,
-        },
-      );
-      if (!response.ok) throw new Error();
-
-      const body: SubsonicEnvelope = await response.json();
-      if (body["subsonic-response"]?.status !== "ok") throw new Error();
-    } catch {
-      playbackError = "The queue could not be synchronized with Navidrome.";
-    }
-  }
-
-  function scheduleQueueSave() {
-    clearTimeout(queueSaveTimer);
-    queueSaveTimer = setTimeout(() => void saveServerQueue(), 300);
-  }
-
   function updatePlaybackTime() {
-    currentTime = audio.currentTime;
+    queueEngine.setPosition(audio.currentTime);
     if (Date.now() - lastPositionSync >= 10_000) {
       lastPositionSync = Date.now();
-      void saveServerQueue();
+      queueEngine.flush();
     }
   }
 
   function replaceQueueAndPlay(items: QueueItem[], startIndex = 0) {
-    queue = items;
-    currentIndex =
-      items.length > 0 ? Math.min(startIndex, items.length - 1) : -1;
-    pendingSeek = 0;
-    scheduleQueueSave();
-    if (currentIndex >= 0) void playCurrent();
+    const index = items.length > 0 ? Math.min(startIndex, items.length - 1) : -1;
+    queueEngine.update({
+      current: items[index]?.id,
+      position: 0,
+      tracks: items,
+    });
+    if (index >= 0) void playCurrent();
     else stopPlayback();
   }
 
@@ -601,9 +523,8 @@
     const request = ++playbackRequest;
     playbackError = "";
     playbackLoading = true;
-    currentTime = 0;
     duration = 0;
-    scheduleQueueSave();
+    queueEngine.save();
 
     try {
       const source = await trackEngine.getSource(track);
@@ -628,8 +549,7 @@
     audio.removeAttribute("src");
     audio.load();
     trackEngine.releaseSource();
-    currentIndex = -1;
-    currentTime = 0;
+    queueEngine.update({ tracks: queue, position: 0 });
     duration = 0;
     isPlaying = false;
     playbackLoading = false;
@@ -637,15 +557,13 @@
 
   function clearQueue() {
     stopPlayback();
-    queue = [];
-    scheduleQueueSave();
+    queueEngine.update({ tracks: [], position: 0 });
   }
 
   function togglePlayback() {
     if (audio.paused) {
       if (currentIndex < 0 && queue.length > 0) {
-        currentIndex = 0;
-        pendingSeek = 0;
+        queueEngine.update({ current: queue[0].id, position: 0, tracks: queue });
         void playCurrent();
       } else if (!audio.currentSrc) {
         void playCurrent();
@@ -658,13 +576,12 @@
     } else {
       audio.pause();
       playbackLoading = false;
-      void saveServerQueue();
+      queueEngine.flush();
     }
   }
 
   function playQueueIndex(index: number) {
-    currentIndex = index;
-    pendingSeek = 0;
+    queueEngine.update({ current: queue[index]?.id, position: 0, tracks: queue });
     void playCurrent();
   }
 
@@ -673,29 +590,37 @@
       audio.pause();
       isPlaying = false;
       playbackLoading = false;
-      void saveServerQueue();
+      queueEngine.flush();
       return;
     }
-    currentIndex += 1;
-    pendingSeek = 0;
+    queueEngine.update({
+      current: queue[currentIndex + 1].id,
+      position: 0,
+      tracks: queue,
+    });
     void playCurrent();
   }
 
   function previousTrack() {
     if (audio.currentTime > 3 || currentIndex <= 0) {
       audio.currentTime = 0;
-      scheduleQueueSave();
+      queueEngine.setPosition(0);
+      queueEngine.save();
       return;
     }
-    currentIndex -= 1;
-    pendingSeek = 0;
+    queueEngine.update({
+      current: queue[currentIndex - 1].id,
+      position: 0,
+      tracks: queue,
+    });
     void playCurrent();
   }
 
   function seek(value: number) {
     if (Number.isFinite(value)) {
       audio.currentTime = value;
-      scheduleQueueSave();
+      queueEngine.setPosition(value);
+      queueEngine.save();
     }
   }
 
@@ -745,7 +670,9 @@
       const credentials = { host: server, username: requestUsername, token, salt };
 
       pendingAuth = credentials;
-      metadataEngine.setNetwork(offlineMode ? "offline" : "online");
+      const network = offlineMode ? "offline" : "online";
+      metadataEngine.setNetwork(network);
+      queueEngine.setNetwork(network);
       metadataEngine.setAuth(credentials);
       if (forceRefresh) metadataEngine.refresh();
     } catch (caught) {
@@ -769,6 +696,7 @@
 
     activeAuth = credentials;
     coverEngine.setAuth(credentials);
+    queueEngine.setAuth(credentials);
     trackEngine.setAuth(credentials);
     connectedHost = credentials.host;
     syncCurrentRoute();
@@ -782,30 +710,18 @@
     } else {
       connectionStatus = "connected";
       localStorage.setItem(authStorageKey, JSON.stringify(credentials));
-      const cacheKey = `${credentials.host}\n${credentials.username}`;
-      if (loadedQueueKey !== cacheKey) {
-        const query = new URLSearchParams({
-          u: credentials.username,
-          t: credentials.token,
-          s: credentials.salt,
-          v: "1.16.1",
-          c: "navidrome-artists",
-          f: "json",
-        });
-        loadServerQueue(credentials.host, query)
-          .then(() => {
-            loadedQueueKey = cacheKey;
-          })
-          .catch(() => {
-            playbackError = "The saved Navidrome queue could not be loaded.";
-          });
-      }
     }
 
     if (navigateAfterConnection) {
       navigateAfterConnection = false;
       connectionOpen = false;
       navigateTo("#/library");
+    }
+  });
+
+  $effect(() => {
+    if (queueEngine.error) {
+      playbackError = "The queue could not be synchronized with Navidrome.";
     }
   });
 </script>
@@ -1011,10 +927,9 @@
         ontimeupdate={updatePlaybackTime}
         onloadedmetadata={() => {
           duration = audio.duration;
-          if (pendingSeek > 0) {
-            audio.currentTime = Math.min(pendingSeek, duration || pendingSeek);
-            currentTime = audio.currentTime;
-            pendingSeek = 0;
+          if (currentTime > 0) {
+            audio.currentTime = Math.min(currentTime, duration || currentTime);
+            queueEngine.setPosition(audio.currentTime);
           }
         }}
         onerror={() => {
