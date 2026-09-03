@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { md5 } from 'js-md5';
-  import { onMount } from 'svelte';
-  import { cacheImage, getCachedImage } from './image-cache';
-  import { loadLibraryCache, saveLibraryCache } from './library-cache';
-  import { TrackEngine } from './track-engine';
+  import { md5 } from "js-md5";
+  import { onDestroy, onMount } from "svelte";
+  import { CoverEngine } from "./cover-engine";
+  import { loadLibraryCache, saveLibraryCache } from "./library-cache";
+  import { TrackEngine } from "./track-engine";
 
-  const authStorageKey = 'navidrome-auth';
-  const offlineModeStorageKey = 'navidrome-offline-mode';
+  const authStorageKey = "navidrome-auth";
+  const offlineModeStorageKey = "navidrome-offline-mode";
 
   interface Track {
     album?: string;
@@ -42,7 +42,7 @@
     year?: number;
   }
 
-  type ApiAlbum = Omit<Album, 'tracks'>;
+  type ApiAlbum = Omit<Album, "tracks">;
 
   interface Artist {
     albums: Album[];
@@ -53,7 +53,7 @@
     name: string;
   }
 
-  type ApiArtist = Omit<Artist, 'albums'>;
+  type ApiArtist = Omit<Artist, "albums">;
 
   interface ArtistIndex {
     artist?: ApiArtist[];
@@ -74,7 +74,7 @@
   }
 
   interface SubsonicEnvelope {
-    'subsonic-response'?: SubsonicResponse;
+    "subsonic-response"?: SubsonicResponse;
   }
 
   interface SavedAuth {
@@ -84,15 +84,15 @@
     salt: string;
   }
 
-  type View = 'library' | 'player' | 'settings';
-  type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+  type View = "library" | "player" | "settings";
+  type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-  let activeView: View = 'library';
+  let activeView: View = "library";
   let selectedArtist: Artist | null = null;
   let selectedAlbum: Album | null = null;
-  let host = '';
-  let username = '';
-  let password = '';
+  let host = "";
+  let username = "";
+  let password = "";
   let artists: Artist[] = [];
   let queue: QueueItem[] = [];
   let activeAuth: SavedAuth | null = null;
@@ -101,92 +101,103 @@
   let duration = 0;
   let isPlaying = false;
   let playbackLoading = false;
-  let playbackError = '';
+  let playbackError = "";
   let audio: HTMLAudioElement;
+  const coverEngine = new CoverEngine();
   const trackEngine = new TrackEngine();
   let pendingSeek = 0;
-  let loadedQueueKey = '';
+  let loadedQueueKey = "";
   let queueSaveTimer: ReturnType<typeof setTimeout> | undefined;
   let lastPositionSync = 0;
   let playbackRequest = 0;
-  let downloadedCacheKey = '';
-  let downloadingCollection = '';
+  let downloadingCollection = "";
   let offlineMode = false;
   let offlineScanning = false;
-  let coverArtObjectUrls = new Map<string, string>();
   let loading = false;
   let refreshing = false;
-  let refreshError = '';
-  let error = '';
-  let connectedHost = '';
-  let connectionStatus: ConnectionStatus = 'disconnected';
+  let refreshError = "";
+  let error = "";
+  let connectedHost = "";
+  let connectionStatus: ConnectionStatus = "disconnected";
   let connectionOpen = false;
 
   function normalizeHost(value: string) {
-    const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    const withProtocol = /^https?:\/\//i.test(value)
+      ? value
+      : `https://${value}`;
     const url = new URL(withProtocol);
-    return url.toString().replace(/\/$/, '');
+    return url.toString().replace(/\/$/, "");
   }
 
   function createSalt() {
     const bytes = crypto.getRandomValues(new Uint8Array(12));
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+      "",
+    );
   }
 
   function isSavedAuth(value: unknown): value is SavedAuth {
-    if (!value || typeof value !== 'object') return false;
+    if (!value || typeof value !== "object") return false;
 
     const auth = value as Record<string, unknown>;
-    return ['host', 'username', 'token', 'salt'].every(
-      (key) => typeof auth[key] === 'string' && auth[key].length > 0
+    return ["host", "username", "token", "salt"].every(
+      (key) => typeof auth[key] === "string" && auth[key].length > 0,
     );
   }
 
   function applyRoute(destination: string, resetScroll = false) {
-    if (resetScroll) window.scrollTo({ top: 0, behavior: 'instant' });
+    if (resetScroll) window.scrollTo({ top: 0, behavior: "instant" });
 
     const url = new URL(destination);
-    const parts = url.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+    const parts = url.hash
+      .replace(/^#\/?/, "")
+      .split("/")
+      .filter(Boolean)
+      .map(decodeURIComponent);
 
-    if (parts[0] === 'player' || parts[0] === 'queue') {
-      activeView = 'player';
+    if (parts[0] === "player" || parts[0] === "queue") {
+      activeView = "player";
       return;
     }
 
-    if (parts[0] === 'settings') {
-      activeView = 'settings';
+    if (parts[0] === "settings") {
+      activeView = "settings";
       return;
     }
 
-    activeView = 'library';
+    activeView = "library";
     selectedArtist = null;
     selectedAlbum = null;
 
-    if (parts[0] !== 'library' || parts[1] !== 'artist' || !parts[2]) return;
-    selectedArtist = artists.find((artist) => (artist.id ?? artist.name) === parts[2]) ?? null;
+    if (parts[0] !== "library" || parts[1] !== "artist" || !parts[2]) return;
+    selectedArtist =
+      artists.find((artist) => (artist.id ?? artist.name) === parts[2]) ?? null;
 
-    if (selectedArtist && parts[3] === 'album' && parts[4]) {
-      selectedAlbum = selectedArtist.albums.find((album) => album.id === parts[4]) ?? null;
+    if (selectedArtist && parts[3] === "album" && parts[4]) {
+      selectedAlbum =
+        selectedArtist.albums.find((album) => album.id === parts[4]) ?? null;
     }
 
     if (selectedArtist) {
       void refreshDownloadedState(
         selectedAlbum
           ? albumQueueItems(selectedArtist, selectedAlbum)
-          : artistQueueItems(selectedArtist)
+          : artistQueueItems(selectedArtist),
       );
     }
   }
 
-  function navigateTo(hash: string, history: 'push' | 'replace' = 'push') {
-    void window.navigation.navigate(hash, { history }).finished?.catch(() => {});
+  function navigateTo(hash: string, history: "push" | "replace" = "push") {
+    void window.navigation
+      .navigate(hash, { history })
+      .finished?.catch(() => {});
   }
 
   function goBack() {
     if (window.navigation.canGoBack) {
       void window.navigation.back().finished?.catch(() => {});
     } else {
-      navigateTo('#/library', 'replace');
+      navigateTo("#/library", "replace");
     }
   }
 
@@ -197,28 +208,39 @@
   onMount(() => {
     const handleNavigation = (event: NavigateEvent) => {
       const destination = new URL(event.destination.url);
-      if (!event.canIntercept || destination.origin !== window.location.origin || !destination.hash.startsWith('#/')) return;
+      if (
+        !event.canIntercept ||
+        destination.origin !== window.location.origin ||
+        !destination.hash.startsWith("#/")
+      )
+        return;
 
-      event.intercept({ handler: () => applyRoute(destination.toString(), true) });
+      event.intercept({
+        handler: () => applyRoute(destination.toString(), true),
+      });
     };
 
-    window.navigation.addEventListener('navigate', handleNavigation);
-    if (window.location.hash.startsWith('#/')) syncCurrentRoute();
-    else navigateTo('#/library', 'replace');
+    window.navigation.addEventListener("navigate", handleNavigation);
+    if (window.location.hash.startsWith("#/")) syncCurrentRoute();
+    else navigateTo("#/library", "replace");
 
-    return () => window.navigation.removeEventListener('navigate', handleNavigation);
+    return () =>
+      window.navigation.removeEventListener("navigate", handleNavigation);
   });
 
-  onMount(() => () => trackEngine.destroy());
+  onDestroy(() => {
+    coverEngine.destroy();
+    trackEngine.destroy();
+  });
 
   onMount(() => {
-    offlineMode = localStorage.getItem(offlineModeStorageKey) === 'true';
+    offlineMode = localStorage.getItem(offlineModeStorageKey) === "true";
 
     try {
       const value = localStorage.getItem(authStorageKey);
       if (!value) {
         connectionOpen = true;
-        navigateTo('#/settings', 'replace');
+        navigateTo("#/settings", "replace");
         return;
       }
 
@@ -226,11 +248,12 @@
       if (!isSavedAuth(savedAuth)) {
         localStorage.removeItem(authStorageKey);
         connectionOpen = true;
-        navigateTo('#/settings', 'replace');
+        navigateTo("#/settings", "replace");
         return;
       }
 
       activeAuth = savedAuth;
+      coverEngine.setAuth(savedAuth);
       trackEngine.setAuth(savedAuth);
       host = savedAuth.host;
       username = savedAuth.username;
@@ -238,17 +261,18 @@
     } catch {
       localStorage.removeItem(authStorageKey);
       connectionOpen = true;
-      navigateTo('#/settings', 'replace');
+      navigateTo("#/settings", "replace");
     }
   });
 
   onMount(() => {
     const saveWhenHidden = () => {
-      if (document.visibilityState === 'hidden') void saveServerQueue();
+      if (document.visibilityState === "hidden") void saveServerQueue();
     };
 
-    document.addEventListener('visibilitychange', saveWhenHidden);
-    return () => document.removeEventListener('visibilitychange', saveWhenHidden);
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    return () =>
+      document.removeEventListener("visibilitychange", saveWhenHidden);
   });
 
   function artistRoute(artist: Artist) {
@@ -259,91 +283,63 @@
     return `${artistRoute(artist)}/album/${encodeURIComponent(album.id)}`;
   }
 
-  function coverArtUrl(id?: string) {
-    if (!id || !activeAuth) return '';
-
-    const query = new URLSearchParams({
-      id,
-      u: activeAuth.username,
-      t: activeAuth.token,
-      s: activeAuth.salt,
-      v: '1.16.1',
-      c: 'navidrome-artists',
-      size: '500'
-    });
-    return `${activeAuth.host}/rest/getCoverArt.view?${query}`;
-  }
-
-  function coverArtCacheKey(id: string) {
-    if (!activeAuth) return id;
-    return `${activeAuth.host}\n${activeAuth.username}\n${id}`;
-  }
-
-  function coverArtSource(id?: string) {
-    if (!id) return '';
-    return coverArtObjectUrls.get(id) ?? (offlineMode ? '' : coverArtUrl(id));
-  }
-
-  function installCachedCoverArt(id: string, file: File, type: string) {
-    if (coverArtObjectUrls.has(id)) return;
-
-    const url = URL.createObjectURL(new Blob([file], { type }));
-    coverArtObjectUrls = new Map(coverArtObjectUrls).set(id, url);
-  }
-
-  async function ensureCoverArtCached(id?: string) {
-    if (!id || !activeAuth || coverArtObjectUrls.has(id)) return;
-
-    const cached = await cacheImage(coverArtCacheKey(id), coverArtUrl(id));
-    installCachedCoverArt(id, cached.file, cached.type);
-  }
-
-  async function loadCachedCoverArt(id?: string) {
-    if (!id || !activeAuth || coverArtObjectUrls.has(id)) return;
-
-    const cached = await getCachedImage(coverArtCacheKey(id));
-    if (cached) installCachedCoverArt(id, cached.file, cached.type);
-  }
-
-  function clearCoverArtObjectUrls() {
-    for (const url of coverArtObjectUrls.values()) URL.revokeObjectURL(url);
-    coverArtObjectUrls = new Map();
-  }
-
   function artistCoverArt(artist: Artist) {
-    return artist.coverArt ?? artist.albums.find((album) => album.coverArt)?.coverArt;
+    return (
+      artist.coverArt ?? artist.albums.find((album) => album.coverArt)?.coverArt
+    );
   }
 
-  function displayedArtistCoverArt(artist: Artist) {
-    if (!offlineMode) return artistCoverArt(artist);
+  function artistCoverArts(artist: Artist) {
     return [
       artist.coverArt,
-      ...artist.albums.flatMap((album) => [album.coverArt, ...album.tracks.map((track) => track.coverArt)])
-    ].find((id) => id && coverArtObjectUrls.has(id));
+      ...artist.albums.flatMap((album) => [
+        album.coverArt,
+        ...album.tracks.map((track) => track.coverArt),
+      ]),
+    ];
   }
 
-  function displayedAlbumCoverArt(album: Album) {
-    if (!offlineMode) return album.coverArt;
-    return [album.coverArt, ...album.tracks.map((track) => track.coverArt)]
-      .find((id) => id && coverArtObjectUrls.has(id));
+  function albumCoverArts(album: Album) {
+    return [album.coverArt, ...album.tracks.map((track) => track.coverArt)];
+  }
+
+  function cacheLoadedCoverArt(event: Event) {
+    coverEngine.cacheLoaded(
+      (event.currentTarget as HTMLImageElement).currentSrc,
+    );
   }
 
   function directGenres(item: { genre?: string; genres?: { name: string }[] }) {
-    const genres = [...(item.genres?.map((genre) => genre.name) ?? []), ...(item.genre ? [item.genre] : [])];
-    return genres.flatMap((genre) => genre.split('|')).map((genre) => genre.trim()).filter(Boolean);
+    const genres = [
+      ...(item.genres?.map((genre) => genre.name) ?? []),
+      ...(item.genre ? [item.genre] : []),
+    ];
+    return genres
+      .flatMap((genre) => genre.split("|"))
+      .map((genre) => genre.trim())
+      .filter(Boolean);
   }
 
   function uniqueGenres(genres: string[]) {
-    return [...new Map(genres.map((genre) => [genre.toLocaleLowerCase(), genre])).values()]
-      .sort((a, b) => a.localeCompare(b));
+    return [
+      ...new Map(
+        genres.map((genre) => [genre.toLocaleLowerCase(), genre]),
+      ).values(),
+    ].sort((a, b) => a.localeCompare(b));
   }
 
   function albumGenres(album: Album) {
-    return uniqueGenres([...directGenres(album), ...album.tracks.flatMap(directGenres)]);
+    return uniqueGenres([
+      ...directGenres(album),
+      ...album.tracks.flatMap(directGenres),
+    ]);
   }
 
   function artistGenres(artist: Artist) {
-    return uniqueGenres([...directGenres(artist), ...artist.albums.flatMap(albumGenres)]);
+    return uniqueGenres([
+      ...directGenres(artist),
+      ...artist.albums.flatMap(albumGenres),
+    ]);
   }
 
   function albumQueueItems(artist: Artist, album: Album): QueueItem[] {
@@ -353,7 +349,7 @@
       contentType: track.contentType,
       coverArt: track.coverArt ?? album.coverArt ?? artistCoverArt(artist),
       id: track.id,
-      title: track.title
+      title: track.title,
     }));
   }
 
@@ -363,7 +359,9 @@
 
   function visibleTracks(album: Album) {
     return offlineMode
-      ? album.tracks.filter((track) => trackEngine.getStatus(track.id) === 'downloaded')
+      ? album.tracks.filter(
+          (track) => trackEngine.getStatus(track.id) === "downloaded",
+        )
       : album.tracks;
   }
 
@@ -380,17 +378,25 @@
   }
 
   function availableQueueItems(items: QueueItem[]) {
-    return offlineMode ? items.filter((track) => trackEngine.getStatus(track.id) === 'downloaded') : items;
+    return offlineMode
+      ? items.filter(
+          (track) => trackEngine.getStatus(track.id) === "downloaded",
+        )
+      : items;
   }
 
-  function trackQueueItem(artist: Artist, album: Album, track: Track): QueueItem {
+  function trackQueueItem(
+    artist: Artist,
+    album: Album,
+    track: Track,
+  ): QueueItem {
     return {
       album: album.name,
       artist: artist.name,
       contentType: track.contentType,
       coverArt: track.coverArt ?? album.coverArt ?? artistCoverArt(artist),
       id: track.id,
-      title: track.title
+      title: track.title,
     };
   }
 
@@ -414,24 +420,19 @@
   }
 
   function addTrackToQueue(artist: Artist, album: Album, track: Track) {
-    if (offlineMode && trackEngine.getStatus(track.id) !== 'downloaded') return;
+    if (offlineMode && trackEngine.getStatus(track.id) !== "downloaded") return;
     queue = [...queue, trackQueueItem(artist, album, track)];
     scheduleQueueSave();
   }
 
-  async function ensureTrackCached(track: QueueItem) {
-    const [file] = await Promise.all([
-      trackEngine.cache(track),
-      ensureCoverArtCached(track.coverArt).catch(() => {})
-    ]);
-    return file;
-  }
-
   async function downloadQueueTrack(track: QueueItem) {
     try {
-      await ensureTrackCached(track);
+      await trackEngine.cache(track);
     } catch (caught) {
-      playbackError = caught instanceof Error ? caught.message : 'The track could not be downloaded.';
+      playbackError =
+        caught instanceof Error
+          ? caught.message
+          : "The track could not be downloaded.";
     }
   }
 
@@ -445,7 +446,9 @@
       }
     }
 
-    await Promise.all(Array.from({ length: Math.min(3, items.length) }, () => worker()));
+    await Promise.all(
+      Array.from({ length: Math.min(3, items.length) }, () => worker()),
+    );
   }
 
   async function downloadAlbum(artist: Artist, album: Album) {
@@ -454,7 +457,7 @@
     try {
       await downloadTracks(albumQueueItems(artist, album));
     } finally {
-      if (downloadingCollection === key) downloadingCollection = '';
+      if (downloadingCollection === key) downloadingCollection = "";
     }
   }
 
@@ -464,7 +467,7 @@
     try {
       await downloadTracks(artistQueueItems(artist));
     } finally {
-      if (downloadingCollection === key) downloadingCollection = '';
+      if (downloadingCollection === key) downloadingCollection = "";
     }
   }
 
@@ -482,27 +485,13 @@
 
     offlineScanning = true;
     try {
-      const cacheKey = `${activeAuth.host}\n${activeAuth.username}`;
-      if (downloadedCacheKey !== cacheKey) {
-        clearCoverArtObjectUrls();
-        downloadedCacheKey = cacheKey;
-      }
-
       const libraryTracks = artists.flatMap(artistQueueItems);
       await refreshDownloadedState(libraryTracks);
 
-      const coverArtIds = [
-        ...new Set(
-          libraryTracks
-            .filter((track) => trackEngine.getStatus(track.id) === 'downloaded')
-            .map((track) => track.coverArt)
-            .filter((id): id is string => Boolean(id))
-        )
-      ];
-      await Promise.all(coverArtIds.map(loadCachedCoverArt));
-
       const currentTrackId = queue[currentIndex]?.id;
-      const offlineQueue = queue.filter((track) => trackEngine.getStatus(track.id) === 'downloaded');
+      const offlineQueue = queue.filter(
+        (track) => trackEngine.getStatus(track.id) === "downloaded",
+      );
       const offlineIndex = currentTrackId
         ? offlineQueue.findIndex((track) => track.id === currentTrackId)
         : -1;
@@ -522,34 +511,42 @@
 
     if (enabled) await scanOfflineLibrary();
     else if (activeAuth) {
-      loadedQueueKey = '';
+      loadedQueueKey = "";
       void loadArtists(activeAuth);
     }
   }
 
   function collectionIsDownloaded(items: QueueItem[]) {
-    return items.length > 0 && items.every((track) => trackEngine.getStatus(track.id) === 'downloaded');
+    return (
+      items.length > 0 &&
+      items.every((track) => trackEngine.getStatus(track.id) === "downloaded")
+    );
   }
 
   async function loadServerQueue(server: string, authQuery: URLSearchParams) {
-    const response = await fetch(`${server}/rest/getPlayQueue.view?${authQuery}`);
-    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+    const response = await fetch(
+      `${server}/rest/getPlayQueue.view?${authQuery}`,
+    );
+    if (!response.ok)
+      throw new Error(`The server returned HTTP ${response.status}.`);
 
     const body: SubsonicEnvelope = await response.json();
-    const result = body['subsonic-response'];
-    if (!result) throw new Error('The server returned an unexpected response.');
-    if (result.status !== 'ok') {
-      throw new Error(result.error?.message || 'Navidrome rejected the request.');
+    const result = body["subsonic-response"];
+    if (!result) throw new Error("The server returned an unexpected response.");
+    if (result.status !== "ok") {
+      throw new Error(
+        result.error?.message || "Navidrome rejected the request.",
+      );
     }
 
     const playQueue = result.playQueue;
     queue = (playQueue?.entry ?? []).map((track) => ({
-      album: track.album ?? 'Unknown album',
-      artist: track.artist ?? 'Unknown artist',
+      album: track.album ?? "Unknown album",
+      artist: track.artist ?? "Unknown artist",
       contentType: track.contentType,
       coverArt: track.coverArt,
       id: track.id,
-      title: track.title
+      title: track.title,
     }));
     currentIndex = playQueue?.current
       ? queue.findIndex((track) => track.id === playQueue.current)
@@ -566,30 +563,33 @@
       u: activeAuth.username,
       t: activeAuth.token,
       s: activeAuth.salt,
-      v: '1.16.1',
-      c: 'navidrome-artists',
-      f: 'json'
+      v: "1.16.1",
+      c: "navidrome-artists",
+      f: "json",
     });
-    for (const track of queue) query.append('id', track.id);
+    for (const track of queue) query.append("id", track.id);
 
     if (currentIndex >= 0 && queue[currentIndex]) {
-      query.set('current', queue[currentIndex].id);
-      query.set('position', String(Math.round(audio.currentTime * 1000)));
+      query.set("current", queue[currentIndex].id);
+      query.set("position", String(Math.round(audio.currentTime * 1000)));
     }
 
     try {
-      const response = await fetch(`${activeAuth.host}/rest/savePlayQueue.view`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: query,
-        keepalive: true
-      });
+      const response = await fetch(
+        `${activeAuth.host}/rest/savePlayQueue.view`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: query,
+          keepalive: true,
+        },
+      );
       if (!response.ok) throw new Error();
 
       const body: SubsonicEnvelope = await response.json();
-      if (body['subsonic-response']?.status !== 'ok') throw new Error();
+      if (body["subsonic-response"]?.status !== "ok") throw new Error();
     } catch {
-      playbackError = 'The queue could not be synchronized with Navidrome.';
+      playbackError = "The queue could not be synchronized with Navidrome.";
     }
   }
 
@@ -608,7 +608,8 @@
 
   function replaceQueueAndPlay(items: QueueItem[], startIndex = 0) {
     queue = items;
-    currentIndex = items.length > 0 ? Math.min(startIndex, items.length - 1) : -1;
+    currentIndex =
+      items.length > 0 ? Math.min(startIndex, items.length - 1) : -1;
     pendingSeek = 0;
     scheduleQueueSave();
     if (currentIndex >= 0) void playCurrent();
@@ -620,7 +621,7 @@
     if (!track) return;
 
     const request = ++playbackRequest;
-    playbackError = '';
+    playbackError = "";
     playbackLoading = true;
     currentTime = 0;
     duration = 0;
@@ -631,23 +632,22 @@
       if (request !== playbackRequest) return;
 
       audio.src = source.url;
-      if (source.cached) void loadCachedCoverArt(track.coverArt);
-
       await audio.play();
       if (!source.cached && request === playbackRequest) {
-        void ensureTrackCached(track).catch(() => {});
+        void trackEngine.cache(track).catch(() => {});
       }
     } catch (caught) {
       if (request !== playbackRequest) return;
       playbackLoading = false;
-      playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
+      playbackError =
+        caught instanceof Error ? caught.message : "Playback failed.";
     }
   }
 
   function stopPlayback() {
     playbackRequest += 1;
     audio.pause();
-    audio.removeAttribute('src');
+    audio.removeAttribute("src");
     audio.load();
     trackEngine.releaseSource();
     currentIndex = -1;
@@ -673,7 +673,8 @@
         void playCurrent();
       } else {
         void audio.play().catch((caught: unknown) => {
-          playbackError = caught instanceof Error ? caught.message : 'Playback failed.';
+          playbackError =
+            caught instanceof Error ? caught.message : "Playback failed.";
         });
       }
     } else {
@@ -726,10 +727,10 @@
   }
 
   function formatTime(value: number) {
-    if (!Number.isFinite(value)) return '0:00';
+    if (!Number.isFinite(value)) return "0:00";
     const minutes = Math.floor(value / 60);
     const seconds = Math.floor(value % 60);
-    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
   }
 
   async function loadAlbums(server: string, authQuery: URLSearchParams) {
@@ -738,18 +739,24 @@
 
     for (let offset = 0; ; offset += pageSize) {
       const query = new URLSearchParams(authQuery);
-      query.set('type', 'alphabeticalByArtist');
-      query.set('size', String(pageSize));
-      query.set('offset', String(offset));
+      query.set("type", "alphabeticalByArtist");
+      query.set("size", String(pageSize));
+      query.set("offset", String(offset));
 
-      const response = await fetch(`${server}/rest/getAlbumList2.view?${query}`);
-      if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+      const response = await fetch(
+        `${server}/rest/getAlbumList2.view?${query}`,
+      );
+      if (!response.ok)
+        throw new Error(`The server returned HTTP ${response.status}.`);
 
       const body: SubsonicEnvelope = await response.json();
-      const result = body['subsonic-response'];
-      if (!result) throw new Error('The server returned an unexpected response.');
-      if (result.status !== 'ok') {
-        throw new Error(result.error?.message || 'Navidrome rejected the request.');
+      const result = body["subsonic-response"];
+      if (!result)
+        throw new Error("The server returned an unexpected response.");
+      if (result.status !== "ok") {
+        throw new Error(
+          result.error?.message || "Navidrome rejected the request.",
+        );
       }
 
       const page = result.albumList2?.album ?? [];
@@ -761,7 +768,7 @@
   async function loadTracks(
     server: string,
     authQuery: URLSearchParams,
-    albums: ApiAlbum[]
+    albums: ApiAlbum[],
   ) {
     const tracksByAlbumId = new Map<string, Track[]>();
     let nextAlbum = 0;
@@ -770,52 +777,63 @@
       while (nextAlbum < albums.length) {
         const album = albums[nextAlbum++];
         const query = new URLSearchParams(authQuery);
-        query.set('id', album.id);
+        query.set("id", album.id);
 
         const response = await fetch(`${server}/rest/getAlbum.view?${query}`);
-        if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+        if (!response.ok)
+          throw new Error(`The server returned HTTP ${response.status}.`);
 
         const body: SubsonicEnvelope = await response.json();
-        const result = body['subsonic-response'];
-        if (!result) throw new Error('The server returned an unexpected response.');
-        if (result.status !== 'ok') {
-          throw new Error(result.error?.message || 'Navidrome rejected the request.');
+        const result = body["subsonic-response"];
+        if (!result)
+          throw new Error("The server returned an unexpected response.");
+        if (result.status !== "ok") {
+          throw new Error(
+            result.error?.message || "Navidrome rejected the request.",
+          );
         }
 
         const tracks = result.album?.song ?? [];
         tracksByAlbumId.set(
           album.id,
           tracks.sort(
-            (a, b) => (a.discNumber ?? 1) - (b.discNumber ?? 1) ||
-              (a.track ?? Number.MAX_SAFE_INTEGER) - (b.track ?? Number.MAX_SAFE_INTEGER) ||
-              a.title.localeCompare(b.title)
-          )
+            (a, b) =>
+              (a.discNumber ?? 1) - (b.discNumber ?? 1) ||
+              (a.track ?? Number.MAX_SAFE_INTEGER) -
+                (b.track ?? Number.MAX_SAFE_INTEGER) ||
+              a.title.localeCompare(b.title),
+          ),
         );
       }
     }
 
-    await Promise.all(Array.from({ length: Math.min(6, albums.length) }, () => worker()));
+    await Promise.all(
+      Array.from({ length: Math.min(6, albums.length) }, () => worker()),
+    );
     return tracksByAlbumId;
   }
 
   async function getLastModified(
     server: string,
     authQuery: URLSearchParams,
-    cachedLastModified?: number
+    cachedLastModified?: number,
   ) {
     const query = new URLSearchParams(authQuery);
     if (cachedLastModified !== undefined) {
-      query.set('ifModifiedSince', String(cachedLastModified));
+      query.set("ifModifiedSince", String(cachedLastModified));
     }
 
     const response = await fetch(`${server}/rest/getIndexes.view?${query}`);
-    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+    if (!response.ok)
+      throw new Error(`The server returned HTTP ${response.status}.`);
 
     const body: SubsonicEnvelope = await response.json();
-    const result = body['subsonic-response'];
-    if (!result) throw new Error('The server returned an unexpected response.');
-    if (result.status !== 'ok') {
-      throw new Error(result.error?.message || 'Navidrome rejected the request.');
+    const result = body["subsonic-response"];
+    if (!result) throw new Error("The server returned an unexpected response.");
+    if (result.status !== "ok") {
+      throw new Error(
+        result.error?.message || "Navidrome rejected the request.",
+      );
     }
 
     if (!result.indexes) return cachedLastModified ?? null;
@@ -825,13 +843,16 @@
 
   async function fetchLibrary(server: string, authQuery: URLSearchParams) {
     const response = await fetch(`${server}/rest/getArtists.view?${authQuery}`);
-    if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
+    if (!response.ok)
+      throw new Error(`The server returned HTTP ${response.status}.`);
 
     const body: SubsonicEnvelope = await response.json();
-    const result = body['subsonic-response'];
-    if (!result) throw new Error('The server returned an unexpected response.');
-    if (result.status !== 'ok') {
-      throw new Error(result.error?.message || 'Navidrome rejected the request.');
+    const result = body["subsonic-response"];
+    if (!result) throw new Error("The server returned an unexpected response.");
+    if (result.status !== "ok") {
+      throw new Error(
+        result.error?.message || "Navidrome rejected the request.",
+      );
     }
 
     const apiAlbums = await loadAlbums(server, authQuery);
@@ -842,7 +863,7 @@
     for (const apiAlbum of apiAlbums) {
       const album: Album = {
         ...apiAlbum,
-        tracks: tracksByAlbumId.get(apiAlbum.id) ?? []
+        tracks: tracksByAlbumId.get(apiAlbum.id) ?? [],
       };
       const map = album.artistId ? albumsByArtistId : albumsByArtistName;
       const key = album.artistId ?? album.artist;
@@ -858,31 +879,33 @@
         albums:
           (artist.id ? albumsByArtistId.get(artist.id) : undefined) ??
           albumsByArtistName.get(artist.name) ??
-          []
+          [],
       }))
       .map((artist) => ({
         ...artist,
         albums: artist.albums.sort(
-          (a, b) => (a.year ?? Number.MAX_SAFE_INTEGER) - (b.year ?? Number.MAX_SAFE_INTEGER) ||
-            a.name.localeCompare(b.name)
-        )
+          (a, b) =>
+            (a.year ?? Number.MAX_SAFE_INTEGER) -
+              (b.year ?? Number.MAX_SAFE_INTEGER) ||
+            a.name.localeCompare(b.name),
+        ),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   function connectionStatusLabel() {
-    if (offlineMode) return 'Offline mode';
-    if (connectionStatus === 'connected') return 'Connected';
-    if (connectionStatus === 'connecting') return 'Checking…';
-    if (connectionStatus === 'error') return 'Connection failed';
-    return 'Disconnected';
+    if (offlineMode) return "Offline mode";
+    if (connectionStatus === "connected") return "Connected";
+    if (connectionStatus === "connecting") return "Checking…";
+    if (connectionStatus === "error") return "Connection failed";
+    return "Disconnected";
   }
 
   function connectionError(caught: unknown) {
     if (caught instanceof TypeError) {
-      return 'Could not reach the server. Check the host and its CORS settings.';
+      return "Could not reach the server. Check the host and its CORS settings.";
     }
-    return caught instanceof Error ? caught.message : 'Could not load artists.';
+    return caught instanceof Error ? caught.message : "Could not load artists.";
   }
 
   async function submitConnection(event: SubmitEvent) {
@@ -890,16 +913,16 @@
     await loadArtists();
     if (!error) {
       connectionOpen = false;
-      navigateTo('#/library');
+      navigateTo("#/library");
     }
   }
 
   async function loadArtists(savedAuth?: SavedAuth, forceRefresh = false) {
     loading = true;
-    connectionStatus = 'connecting';
+    connectionStatus = "connecting";
     refreshing = false;
-    error = '';
-    refreshError = '';
+    error = "";
+    refreshError = "";
 
     let hasCachedLibrary = false;
 
@@ -908,18 +931,25 @@
       const requestUsername = savedAuth?.username ?? username;
       const salt = savedAuth?.salt ?? createSalt();
       const token = savedAuth?.token ?? md5(password + salt);
-      const credentials = { host: server, username: requestUsername, token, salt };
+      const credentials = {
+        host: server,
+        username: requestUsername,
+        token,
+        salt,
+      };
       const cacheKey = `${server}\n${requestUsername}`;
       const query = new URLSearchParams({
         u: requestUsername,
         t: token,
         s: salt,
-        v: '1.16.1',
-        c: 'navidrome-artists',
-        f: 'json'
+        v: "1.16.1",
+        c: "navidrome-artists",
+        f: "json",
       });
 
-      const cached = await loadLibraryCache<Artist[]>(cacheKey).catch(() => null);
+      const cached = await loadLibraryCache<Artist[]>(cacheKey).catch(
+        () => null,
+      );
       if (cached) {
         hasCachedLibrary = true;
         artists = cached.data;
@@ -929,50 +959,55 @@
         refreshing = true;
       } else {
         artists = [];
-        connectedHost = '';
+        connectedHost = "";
       }
 
       if (offlineMode) {
         activeAuth = credentials;
+        coverEngine.setAuth(credentials);
         trackEngine.setAuth(credentials);
-        connectionStatus = 'disconnected';
-        if (!cached) throw new Error('No cached library is available offline.');
+        connectionStatus = "disconnected";
+        if (!cached) throw new Error("No cached library is available offline.");
         await scanOfflineLibrary();
         return;
       }
 
-      const lastModified = await getLastModified(server, query, cached?.lastModified);
+      const lastModified = await getLastModified(
+        server,
+        query,
+        cached?.lastModified,
+      );
       activeAuth = credentials;
+      coverEngine.setAuth(credentials);
       trackEngine.setAuth(credentials);
-      connectionStatus = 'connected';
+      connectionStatus = "connected";
       localStorage.setItem(authStorageKey, JSON.stringify(credentials));
 
       if (loadedQueueKey !== cacheKey) {
-        clearCoverArtObjectUrls();
-        downloadedCacheKey = cacheKey;
         try {
           await loadServerQueue(server, query);
           loadedQueueKey = cacheKey;
         } catch {
-          playbackError = 'The saved Navidrome queue could not be loaded.';
+          playbackError = "The saved Navidrome queue could not be loaded.";
         }
       }
 
-      if (!forceRefresh && cached && lastModified === cached.lastModified) return;
+      if (!forceRefresh && cached && lastModified === cached.lastModified)
+        return;
 
       refreshing = hasCachedLibrary;
       const freshArtists = await fetchLibrary(server, query);
       await saveLibraryCache(cacheKey, {
         data: freshArtists,
         lastModified: lastModified ?? 0,
-        savedAt: Date.now()
+        savedAt: Date.now(),
       });
 
       artists = freshArtists;
       connectedHost = server;
       syncCurrentRoute();
     } catch (caught) {
-      connectionStatus = 'error';
+      connectionStatus = "error";
       const message = connectionError(caught);
       if (hasCachedLibrary) {
         refreshError = `Background refresh failed: ${message}`;
@@ -996,40 +1031,46 @@
 
 <main class="app-shell">
   <header class="topbar">
-    {#if activeView === 'library' && selectedArtist}
+    {#if activeView === "library" && selectedArtist}
       <a
         class="topbar-icon"
-        href={selectedAlbum ? artistRoute(selectedArtist) : '#/library'}
-        title="Back"
-      >{@render icon('back')}</a>
-    {:else if activeView === 'player'}
-      <button type="button" class="topbar-icon" onclick={goBack} title="Back">{@render icon('back')}</button>
+        href={selectedAlbum ? artistRoute(selectedArtist) : "#/library"}
+        title="Back">{@render icon("back")}</a
+      >
+    {:else if activeView === "player"}
+      <button type="button" class="topbar-icon" onclick={goBack} title="Back"
+        >{@render icon("back")}</button
+      >
     {:else}
       <span class="topbar-spacer"></span>
     {/if}
 
     <strong>
-      {activeView === 'player'
-        ? 'Now playing'
-        : activeView === 'settings'
-          ? 'Settings'
-          : 'Library'}
+      {activeView === "player"
+        ? "Now playing"
+        : activeView === "settings"
+          ? "Settings"
+          : "Library"}
     </strong>
 
-    {#if activeView === 'library' && !selectedArtist}
-      <a class="topbar-icon" href="#/settings" title="Settings">{@render icon('settings')}</a>
+    {#if activeView === "library" && !selectedArtist}
+      <a class="topbar-icon" href="#/settings" title="Settings"
+        >{@render icon("settings")}</a
+      >
     {:else}
-      <a class="topbar-icon" href="#/library" title="Home">{@render icon('home')}</a>
+      <a class="topbar-icon" href="#/library" title="Home"
+        >{@render icon("home")}</a
+      >
     {/if}
   </header>
 
-  <section class="view settings-view" class:hidden={activeView !== 'settings'}>
+  <section class="view settings-view" class:hidden={activeView !== "settings"}>
     <span class="eyebrow">Settings</span>
-    <h2>{activeAuth ? 'Music server' : 'Connect to your music'}</h2>
+    <h2>{activeAuth ? "Music server" : "Connect to your music"}</h2>
     <p class="muted">
       {activeAuth
-        ? 'Manage the server used for your library.'
-        : 'Enter your Navidrome server details. Authentication stays on this device.'}
+        ? "Manage the server used for your library."
+        : "Enter your Navidrome server details. Authentication stays on this device."}
     </p>
 
     <details class="connection-card" bind:open={connectionOpen}>
@@ -1037,17 +1078,19 @@
         <span
           class="connection-dot"
           class:offline={offlineMode}
-          class:connected={!offlineMode && connectionStatus === 'connected'}
-          class:connecting={!offlineMode && connectionStatus === 'connecting'}
-          class:failed={!offlineMode && connectionStatus === 'error'}
+          class:connected={!offlineMode && connectionStatus === "connected"}
+          class:connecting={!offlineMode && connectionStatus === "connecting"}
+          class:failed={!offlineMode && connectionStatus === "error"}
         ></span>
         <span class="connection-summary">
-          <strong>{activeAuth?.host ?? 'Add a server'}</strong>
+          <strong>{activeAuth?.host ?? "Add a server"}</strong>
           <small>
-            {activeAuth ? `${activeAuth.username} · ${connectionStatusLabel()}` : 'Navidrome connection'}
+            {activeAuth
+              ? `${activeAuth.username} · ${connectionStatusLabel()}`
+              : "Navidrome connection"}
           </small>
         </span>
-        <span class="connection-chevron">{@render icon('chevron-down')}</span>
+        <span class="connection-chevron">{@render icon("chevron-down")}</span>
       </summary>
 
       <div class="connection-details">
@@ -1062,7 +1105,11 @@
             disabled={offlineMode || loading || refreshing}
             onclick={() => loadArtists(activeAuth!, true)}
           >
-            {offlineMode ? 'Unavailable offline' : loading || refreshing ? 'Refreshing…' : 'Refresh library data'}
+            {offlineMode
+              ? "Unavailable offline"
+              : loading || refreshing
+                ? "Refreshing…"
+                : "Refresh library data"}
           </button>
           <h3>Edit connection</h3>
         {/if}
@@ -1081,19 +1128,35 @@
 
           <label>
             Username
-            <input type="text" bind:value={username} autocomplete="username" required />
+            <input
+              type="text"
+              bind:value={username}
+              autocomplete="username"
+              required
+            />
           </label>
 
           <label>
             Password
-            <input type="password" bind:value={password} autocomplete="current-password" required />
+            <input
+              type="password"
+              bind:value={password}
+              autocomplete="current-password"
+              required
+            />
           </label>
 
           <button type="submit" disabled={offlineMode || loading || refreshing}>
-            {loading ? 'Connecting…' : activeAuth ? 'Save connection' : 'Connect'}
+            {loading
+              ? "Connecting…"
+              : activeAuth
+                ? "Save connection"
+                : "Connect"}
           </button>
 
-          <small>Authentication is saved in this browser after a successful login.</small>
+          <small
+            >Authentication is saved in this browser after a successful login.</small
+          >
         </form>
       </div>
     </details>
@@ -1103,8 +1166,8 @@
         <strong>Offline library</strong>
         <small>
           {offlineScanning
-            ? 'Checking downloaded tracks…'
-            : 'Show only music downloaded to this device.'}
+            ? "Checking downloaded tracks…"
+            : "Show only music downloaded to this device."}
         </small>
       </div>
       <label class="switch">
@@ -1127,79 +1190,104 @@
     <p class="error">{refreshError} Cached metadata is still being shown.</p>
   {/if}
 
-  <section class="view player-view" class:hidden={activeView !== 'player'}>
+  <section class="view player-view" class:hidden={activeView !== "player"}>
     <div class="player-main">
       <div class="artwork">
-      {#if currentIndex >= 0 && queue[currentIndex] && coverArtSource(queue[currentIndex].coverArt)}
-        <img src={coverArtSource(queue[currentIndex].coverArt)} alt="" />
-      {:else}
-        <span>{@render icon('music')}</span>
-      {/if}
-    </div>
-    <audio
-      bind:this={audio}
-      preload="metadata"
-      onplay={() => isPlaying = true}
-      onplaying={() => {
-        isPlaying = true;
-        playbackLoading = false;
-      }}
-      onpause={() => isPlaying = false}
-      onwaiting={() => playbackLoading = true}
-      oncanplay={() => playbackLoading = false}
-      onended={nextTrack}
-      ontimeupdate={updatePlaybackTime}
-      onloadedmetadata={() => {
-        duration = audio.duration;
-        if (pendingSeek > 0) {
-          audio.currentTime = Math.min(pendingSeek, duration || pendingSeek);
-          currentTime = audio.currentTime;
-          pendingSeek = 0;
-        }
-      }}
-      onerror={() => {
-        playbackLoading = false;
-        if (audio.currentSrc) playbackError = 'The track could not be played.';
-      }}
-    ></audio>
-
-    {#if currentIndex >= 0 && queue[currentIndex]}
-      <p>
-        <strong>{queue[currentIndex].title}</strong><br />
-        {queue[currentIndex].artist} — {queue[currentIndex].album}
-      </p>
-    {/if}
-
-    <div class="playback-progress">
-      <input
-        class="playback-slider"
-        type="range"
-        min="0"
-        max={Number.isFinite(duration) ? duration : 0}
-        step="0.1"
-        value={currentTime}
-        disabled={!duration}
-        oninput={(event) => seek(event.currentTarget.valueAsNumber)}
-      />
-      <div class="playback-time">
-        <span>{formatTime(currentTime)}</span>
-        <span>{formatTime(duration)}</span>
-      </div>
-    </div>
-
-    <div class="controls">
-      <button type="button" onclick={previousTrack} disabled={currentIndex <= 0} title="Previous">{@render icon('previous')}</button>
-      <button type="button" class="play-control" onclick={togglePlayback} disabled={queue.length === 0} title={isPlaying ? 'Pause' : 'Play'}>
-        {#if playbackLoading}
-          {@render icon('loading')}
-        {:else if isPlaying}
-          {@render icon('pause')}
+        {#if currentIndex >= 0 && queue[currentIndex]?.coverArt}
+          <img
+            src={coverEngine.getSource({
+              candidates: [queue[currentIndex].coverArt],
+              allowNetwork: !offlineMode,
+            })}
+            alt=""
+            loading="lazy"
+            onload={cacheLoadedCoverArt}
+          />
         {:else}
-          {@render icon('play')}
+          <span>{@render icon("music")}</span>
         {/if}
-      </button>
-      <button type="button" onclick={nextTrack} disabled={currentIndex < 0 || currentIndex + 1 >= queue.length} title="Next">{@render icon('next')}</button>
-    </div>
+      </div>
+      <audio
+        bind:this={audio}
+        preload="metadata"
+        onplay={() => (isPlaying = true)}
+        onplaying={() => {
+          isPlaying = true;
+          playbackLoading = false;
+        }}
+        onpause={() => (isPlaying = false)}
+        onwaiting={() => (playbackLoading = true)}
+        oncanplay={() => (playbackLoading = false)}
+        onended={nextTrack}
+        ontimeupdate={updatePlaybackTime}
+        onloadedmetadata={() => {
+          duration = audio.duration;
+          if (pendingSeek > 0) {
+            audio.currentTime = Math.min(pendingSeek, duration || pendingSeek);
+            currentTime = audio.currentTime;
+            pendingSeek = 0;
+          }
+        }}
+        onerror={() => {
+          playbackLoading = false;
+          if (audio.currentSrc)
+            playbackError = "The track could not be played.";
+        }}
+      ></audio>
+
+      {#if currentIndex >= 0 && queue[currentIndex]}
+        <p>
+          <strong>{queue[currentIndex].title}</strong><br />
+          {queue[currentIndex].artist} — {queue[currentIndex].album}
+        </p>
+      {/if}
+
+      <div class="playback-progress">
+        <input
+          class="playback-slider"
+          type="range"
+          min="0"
+          max={Number.isFinite(duration) ? duration : 0}
+          step="0.1"
+          value={currentTime}
+          disabled={!duration}
+          oninput={(event) => seek(event.currentTarget.valueAsNumber)}
+        />
+        <div class="playback-time">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button
+          type="button"
+          onclick={previousTrack}
+          disabled={currentIndex <= 0}
+          title="Previous">{@render icon("previous")}</button
+        >
+        <button
+          type="button"
+          class="play-control"
+          onclick={togglePlayback}
+          disabled={queue.length === 0}
+          title={isPlaying ? "Pause" : "Play"}
+        >
+          {#if playbackLoading}
+            {@render icon("loading")}
+          {:else if isPlaying}
+            {@render icon("pause")}
+          {:else}
+            {@render icon("play")}
+          {/if}
+        </button>
+        <button
+          type="button"
+          onclick={nextTrack}
+          disabled={currentIndex < 0 || currentIndex + 1 >= queue.length}
+          title="Next">{@render icon("next")}</button
+        >
+      </div>
 
       {#if playbackError}
         <p class="error">{playbackError}</p>
@@ -1210,17 +1298,22 @@
       <div class="section-heading">
         <div>
           <span class="eyebrow">Up next</span>
-          <h2>{queue.length} track{queue.length === 1 ? '' : 's'}</h2>
+          <h2>{queue.length} track{queue.length === 1 ? "" : "s"}</h2>
         </div>
         {#if queue.length > 0}
-          <button type="button" class="quiet" onclick={clearQueue}>Clear</button>
+          <button type="button" class="quiet" onclick={clearQueue}>Clear</button
+          >
         {/if}
       </div>
       {#if queue.length > 0}
         <div class="track-list">
           {#each queue as item, index}
             <div class="track-row" class:current={index === currentIndex}>
-              <button type="button" class="track-main" onclick={() => playQueueIndex(index)}>
+              <button
+                type="button"
+                class="track-main"
+                onclick={() => playQueueIndex(index)}
+              >
                 <span class="track-number">{index + 1}</span>
                 <span>{item.title}</span>
               </button>
@@ -1231,15 +1324,15 @@
                 title="Download track"
               >
                 {#if index === currentIndex && playbackLoading}
-                  {@render icon('loading')}
+                  {@render icon("loading")}
                 {:else if index === currentIndex && isPlaying}
-                  {@render icon('sound-bars')}
-                {:else if trackEngine.getStatus(item.id) === 'downloading'}
-                  {@render icon('loading')}
-                {:else if trackEngine.getStatus(item.id) === 'downloaded'}
-                  {@render icon('check')}
+                  {@render icon("sound-bars")}
+                {:else if trackEngine.getStatus(item.id) === "downloading"}
+                  {@render icon("loading")}
+                {:else if trackEngine.getStatus(item.id) === "downloaded"}
+                  {@render icon("check")}
                 {:else}
-                  {@render icon('download')}
+                  {@render icon("download")}
                 {/if}
               </button>
             </div>
@@ -1251,30 +1344,50 @@
     </div>
   </section>
 
-  <section class="view library-view" class:hidden={activeView !== 'library'}>
+  <section class="view library-view" class:hidden={activeView !== "library"}>
     {#if connectedHost && !error}
       <div class="section-heading">
         <div>
           <span class="eyebrow">
-            {selectedAlbum ? selectedArtist?.name : selectedArtist ? 'Albums' : offlineMode ? 'Downloaded music' : 'Your music'}
+            {selectedAlbum
+              ? selectedArtist?.name
+              : selectedArtist
+                ? "Albums"
+                : offlineMode
+                  ? "Downloaded music"
+                  : "Your music"}
           </span>
-          <h2>{selectedAlbum?.name ?? selectedArtist?.name ?? `${visibleArtists().length} artists`}</h2>
+          <h2>
+            {selectedAlbum?.name ??
+              selectedArtist?.name ??
+              `${visibleArtists().length} artists`}
+          </h2>
           {#if selectedAlbum}
             <p class="library-meta">
-              {selectedArtist?.name} · {selectedAlbum.year ?? 'Unknown year'} · {visibleTracks(selectedAlbum).length} track{visibleTracks(selectedAlbum).length === 1 ? '' : 's'}
+              {selectedArtist?.name} · {selectedAlbum.year ?? "Unknown year"} · {visibleTracks(
+                selectedAlbum,
+              ).length} track{visibleTracks(selectedAlbum).length === 1
+                ? ""
+                : "s"}
             </p>
             {#if albumGenres(selectedAlbum).length > 0}
               <div class="genre-list">
-                {#each albumGenres(selectedAlbum) as genre}<span>{genre}</span>{/each}
+                {#each albumGenres(selectedAlbum) as genre}<span>{genre}</span
+                  >{/each}
               </div>
             {/if}
           {:else if selectedArtist}
             <p class="library-meta">
-              {visibleAlbums(selectedArtist).length} album{visibleAlbums(selectedArtist).length === 1 ? '' : 's'}
+              {visibleAlbums(selectedArtist).length} album{visibleAlbums(
+                selectedArtist,
+              ).length === 1
+                ? ""
+                : "s"}
             </p>
             {#if artistGenres(selectedArtist).length > 0}
               <div class="genre-list">
-                {#each artistGenres(selectedArtist) as genre}<span>{genre}</span>{/each}
+                {#each artistGenres(selectedArtist) as genre}<span>{genre}</span
+                  >{/each}
               </div>
             {/if}
           {/if}
@@ -1287,11 +1400,11 @@
             title="Download album"
           >
             {#if downloadingCollection === `album:${selectedAlbum.id}`}
-              {@render icon('loading')}
+              {@render icon("loading")}
             {:else if collectionIsDownloaded(albumQueueItems(selectedArtist, selectedAlbum))}
-              {@render icon('check')}
+              {@render icon("check")}
             {:else}
-              {@render icon('download')}
+              {@render icon("download")}
             {/if}
           </button>
         {:else if !offlineMode && selectedArtist}
@@ -1302,11 +1415,11 @@
             title="Download artist"
           >
             {#if downloadingCollection === `artist:${selectedArtist.id ?? selectedArtist.name}`}
-              {@render icon('loading')}
+              {@render icon("loading")}
             {:else if collectionIsDownloaded(artistQueueItems(selectedArtist))}
-              {@render icon('check')}
+              {@render icon("check")}
             {:else}
-              {@render icon('download')}
+              {@render icon("download")}
             {/if}
           </button>
         {/if}
@@ -1314,39 +1427,55 @@
 
       {#if offlineScanning}
         <div class="empty-state">
-          <div class="scan-spinner">{@render icon('loading')}</div>
+          <div class="scan-spinner">{@render icon("loading")}</div>
           <p>Checking downloaded music…</p>
         </div>
       {:else if selectedArtist && selectedAlbum}
         <div class="track-list">
           {#each visibleTracks(selectedAlbum) as track, index}
             <div class="track-row">
-              <button type="button" class="track-main" onclick={() => playTrack(selectedArtist!, selectedAlbum!, track)}>
+              <button
+                type="button"
+                class="track-main"
+                onclick={() =>
+                  playTrack(selectedArtist!, selectedAlbum!, track)}
+              >
                 <span class="track-number">{track.track ?? index + 1}</span>
                 <span>{track.title}</span>
               </button>
               <button
                 type="button"
                 class="row-action"
-                onclick={() => downloadLibraryTrack(selectedArtist!, selectedAlbum!, track)}
+                onclick={() =>
+                  downloadLibraryTrack(selectedArtist!, selectedAlbum!, track)}
                 title="Download track"
               >
                 {#if queue[currentIndex]?.id === track.id && playbackLoading}
-                  {@render icon('loading')}
+                  {@render icon("loading")}
                 {:else if queue[currentIndex]?.id === track.id && isPlaying}
-                  {@render icon('sound-bars')}
-                {:else if trackEngine.getStatus(track.id) === 'downloading'}
-                  {@render icon('loading')}
-                {:else if trackEngine.getStatus(track.id) === 'downloaded'}
-                  {@render icon('check')}
+                  {@render icon("sound-bars")}
+                {:else if trackEngine.getStatus(track.id) === "downloading"}
+                  {@render icon("loading")}
+                {:else if trackEngine.getStatus(track.id) === "downloaded"}
+                  {@render icon("check")}
                 {:else}
-                  {@render icon('download')}
+                  {@render icon("download")}
                 {/if}
               </button>
-              <button type="button" class="row-action" onclick={() => addTrackToQueue(selectedArtist!, selectedAlbum!, track)}>{@render icon('plus')}</button>
+              <button
+                type="button"
+                class="row-action"
+                onclick={() =>
+                  addTrackToQueue(selectedArtist!, selectedAlbum!, track)}
+                >{@render icon("plus")}</button
+              >
             </div>
           {:else}
-            <div class="empty-state"><p>{offlineMode ? 'No downloaded tracks.' : 'No tracks found.'}</p></div>
+            <div class="empty-state">
+              <p>
+                {offlineMode ? "No downloaded tracks." : "No tracks found."}
+              </p>
+            </div>
           {/each}
         </div>
       {:else if selectedArtist}
@@ -1355,30 +1484,54 @@
             <article class="album-row">
               <a class="album-main" href={albumRoute(selectedArtist, album)}>
                 <span class="cover album-cover">
-                  {#if coverArtSource(displayedAlbumCoverArt(album))}
-                    <img src={coverArtSource(displayedAlbumCoverArt(album))} alt="" loading="lazy" />
+                  {#if albumCoverArts(album).some(Boolean)}
+                    <img
+                      src={coverEngine.getSource({
+                        candidates: albumCoverArts(album),
+                        allowNetwork: !offlineMode,
+                      })}
+                      alt=""
+                      loading="lazy"
+                      onload={cacheLoadedCoverArt}
+                    />
                   {:else}
-                    <span>{@render icon('music')}</span>
+                    <span>{@render icon("music")}</span>
                   {/if}
                 </span>
                 <span class="album-copy">
                   <strong>{album.name}</strong>
-                  <small>{album.year ?? 'Unknown year'} · {visibleTracks(album).length} tracks</small>
+                  <small
+                    >{album.year ?? "Unknown year"} · {visibleTracks(album)
+                      .length} tracks</small
+                  >
                 </span>
               </a>
-              <button type="button" class="row-action" onclick={() => playAlbum(selectedArtist!, album)}>
+              <button
+                type="button"
+                class="row-action"
+                onclick={() => playAlbum(selectedArtist!, album)}
+              >
                 {#if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === selectedArtist.name && playbackLoading}
-                  {@render icon('loading')}
+                  {@render icon("loading")}
                 {:else if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === selectedArtist.name && isPlaying}
-                  {@render icon('sound-bars')}
+                  {@render icon("sound-bars")}
                 {:else}
-                  {@render icon('play')}
+                  {@render icon("play")}
                 {/if}
               </button>
-              <button type="button" class="row-action" onclick={() => addAlbumToQueue(selectedArtist!, album)}>{@render icon('plus')}</button>
+              <button
+                type="button"
+                class="row-action"
+                onclick={() => addAlbumToQueue(selectedArtist!, album)}
+                >{@render icon("plus")}</button
+              >
             </article>
           {:else}
-            <div class="empty-state"><p>{offlineMode ? 'No downloaded albums.' : 'No albums found.'}</p></div>
+            <div class="empty-state">
+              <p>
+                {offlineMode ? "No downloaded albums." : "No albums found."}
+              </p>
+            </div>
           {/each}
         </div>
       {:else if visibleArtists().length > 0}
@@ -1387,21 +1540,33 @@
             <article class="artist-card">
               <a class="artist-main" href={artistRoute(artist)}>
                 <span class="cover artist-cover">
-                  {#if coverArtSource(displayedArtistCoverArt(artist))}
-                    <img src={coverArtSource(displayedArtistCoverArt(artist))} alt="" loading="lazy" />
+                  {#if artistCoverArts(artist).some(Boolean)}
+                    <img
+                      src={coverEngine.getSource({
+                        candidates: artistCoverArts(artist),
+                        allowNetwork: !offlineMode,
+                      })}
+                      alt=""
+                      loading="lazy"
+                      onload={cacheLoadedCoverArt}
+                    />
                   {:else}
-                    <span>{@render icon('music')}</span>
+                    <span>{@render icon("music")}</span>
                   {/if}
                   <strong class="artist-name">{artist.name}</strong>
                 </span>
               </a>
-              <button type="button" class="artist-play" onclick={() => playArtist(artist)}>
+              <button
+                type="button"
+                class="artist-play"
+                onclick={() => playArtist(artist)}
+              >
                 {#if queue[currentIndex]?.artist === artist.name && playbackLoading}
-                  {@render icon('loading')}
+                  {@render icon("loading")}
                 {:else if queue[currentIndex]?.artist === artist.name && isPlaying}
-                  {@render icon('sound-bars')}
+                  {@render icon("sound-bars")}
                 {:else}
-                  {@render icon('play')}
+                  {@render icon("play")}
                 {/if}
               </button>
             </article>
@@ -1409,13 +1574,13 @@
         </div>
       {:else}
         <div class="empty-state">
-          <span>{@render icon('music')}</span>
-          <p>{offlineMode ? 'No downloaded artists.' : 'No artists found.'}</p>
+          <span>{@render icon("music")}</span>
+          <p>{offlineMode ? "No downloaded artists." : "No artists found."}</p>
         </div>
       {/if}
     {:else if !loading}
       <div class="empty-state">
-        <span>{@render icon('music')}</span>
+        <span>{@render icon("music")}</span>
         <h2>Connect your library</h2>
         <p>Add your Navidrome server to start listening.</p>
         <a class="primary" href="#/settings">Open settings</a>
@@ -1423,13 +1588,23 @@
     {/if}
   </section>
 
-  {#if queue.length > 0 && activeView !== 'player'}
+  {#if queue.length > 0 && activeView !== "player"}
     <a class="mini-player" href="#/player">
       <span class="mini-art">
-        {#if coverArtSource(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)}
-          <img src={coverArtSource(queue[currentIndex >= 0 ? currentIndex : 0].coverArt)} alt="" />
+        {#if queue[currentIndex >= 0 ? currentIndex : 0].coverArt}
+          <img
+            src={coverEngine.getSource({
+              candidates: [
+                queue[currentIndex >= 0 ? currentIndex : 0].coverArt,
+              ],
+              allowNetwork: !offlineMode,
+            })}
+            alt=""
+            loading="lazy"
+            onload={cacheLoadedCoverArt}
+          />
         {:else}
-          <span>{@render icon('music')}</span>
+          <span>{@render icon("music")}</span>
         {/if}
       </span>
       <span class="mini-copy">
@@ -1446,19 +1621,20 @@
           togglePlayback();
         }}
         onkeydown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') togglePlayback();
-        }}>
-        {#if playbackLoading}
-          {@render icon('loading')}
-        {:else if isPlaying}
-          {@render icon('pause')}
-        {:else}
-          {@render icon('play')}
-        {/if}
-      </span
+          if (event.key === "Enter" || event.key === " ") togglePlayback();
+        }}
       >
-      <span class="mini-progress"><span style:width={`${playbackPercent()}%`}></span></span>
+        {#if playbackLoading}
+          {@render icon("loading")}
+        {:else if isPlaying}
+          {@render icon("pause")}
+        {:else}
+          {@render icon("play")}
+        {/if}
+      </span>
+      <span class="mini-progress"
+        ><span style:width={`${playbackPercent()}%`}></span></span
+      >
     </a>
   {/if}
-
 </main>
