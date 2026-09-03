@@ -71,6 +71,18 @@ describe("track engine", () => {
     expect(new URL(source.url).searchParams.get("format")).toBe("raw");
   });
 
+  it("can force MP3 when a browser rejects a reportedly supported format", async () => {
+    installOpfs(null, "probably");
+    const engine = new TrackEngine({ auth });
+
+    const source = await engine.getSource(
+      { id: "track-1", contentType: "audio/flac" },
+      { forceTranscode: true },
+    );
+
+    expect(new URL(source.url).searchParams.get("format")).toBe("mp3");
+  });
+
   it("falls back to MP3 for unsupported formats", async () => {
     installOpfs();
     const engine = new TrackEngine({ auth });

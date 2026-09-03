@@ -17,6 +17,10 @@ export interface TrackSource {
   url: string;
 }
 
+export interface TrackSourceOptions {
+  forceTranscode?: boolean;
+}
+
 export type TrackStatus = "idle" | "downloading" | "downloaded";
 
 export interface TrackEngineOptions {
@@ -61,11 +65,15 @@ export class TrackEngine {
     this.#activeObjectUrl = "";
   }
 
-  #describe(track: EngineTrack): StreamDescriptor {
+  #describe(track: EngineTrack, options: TrackSourceOptions = {}): StreamDescriptor {
     if (!this.#auth) throw new Error("No active Navidrome connection.");
 
     const format =
-      track.contentType && this.#mediaProbe.canPlayType(track.contentType) ? "raw" : "mp3";
+      !options.forceTranscode &&
+      track.contentType &&
+      this.#mediaProbe.canPlayType(track.contentType)
+        ? "raw"
+        : "mp3";
     const contentType = format === "raw" && track.contentType ? track.contentType : "audio/mpeg";
     const query = new URLSearchParams({
       id: track.id,
@@ -109,8 +117,8 @@ export class TrackEngine {
     }
   }
 
-  cache(track: EngineTrack) {
-    const descriptor = this.#describe(track);
+  cache(track: EngineTrack, options: TrackSourceOptions = {}) {
+    const descriptor = this.#describe(track, options);
     const activeDownload = this.#downloads.get(descriptor.cacheKey);
     if (activeDownload) return activeDownload;
 
@@ -145,9 +153,9 @@ export class TrackEngine {
     return this.#statuses.get(trackId) ?? "idle";
   }
 
-  async getSource(track: EngineTrack): Promise<TrackSource> {
+  async getSource(track: EngineTrack, options: TrackSourceOptions = {}): Promise<TrackSource> {
     const request = ++this.#sourceRequest;
-    const descriptor = this.#describe(track);
+    const descriptor = this.#describe(track, options);
     const cached = await this.#store.get(descriptor.cacheKey);
     if (request !== this.#sourceRequest) {
       throw new DOMException("Source request superseded.", "AbortError");

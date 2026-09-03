@@ -51,6 +51,7 @@
   const trackEngine = new TrackEngine();
   let lastPositionSync = 0;
   let playbackRequest = 0;
+  let playbackSourceCached = false;
   let downloadingCollection = $state("");
   let offlineMode = $state(false);
   let offlineScanning = $state(false);
@@ -440,24 +441,67 @@
     else stopPlayback();
   }
 
-  async function playCurrent() {
+  function unsupportedSource(caught: unknown) {
+    return (
+      (caught instanceof DOMException && caught.name === "NotSupportedError") ||
+      (caught instanceof Error && /supported sources/i.test(caught.message))
+    );
+  }
+
+  async function playCurrent(startAt = currentTime, forceTranscode = false) {
     const track = queue[currentIndex];
     if (!track) return;
 
     const request = ++playbackRequest;
     playbackError = "";
     playbackLoading = true;
-    duration = 0;
+    if (startAt <= 0) duration = 0;
     queueEngine.save();
 
-    try {
-      const source = await trackEngine.getSource(track);
+    const playSource = async (forceTranscode: boolean) => {
+      const source = await trackEngine.getSource(track, { forceTranscode });
       if (request !== playbackRequest) return;
 
+      playbackSourceCached = source.cached;
       audio.src = source.url;
+      if (source.cached && startAt > 0) {
+        if (audio.readyState < HTMLMediaElement.HAVE_METADATA) {
+          await new Promise<void>((resolve, reject) => {
+            const loaded = () => {
+              audio.removeEventListener("error", failed);
+              resolve();
+            };
+            const failed = () => {
+              audio.removeEventListener("loadedmetadata", loaded);
+              reject(new DOMException("The cached track could not be played.", "NotSupportedError"));
+            };
+            audio.addEventListener("loadedmetadata", loaded, { once: true });
+            audio.addEventListener("error", failed, { once: true });
+          });
+        }
+        if (request !== playbackRequest) return;
+        audio.currentTime = Math.min(startAt, audio.duration || startAt);
+        queueEngine.setPosition(audio.currentTime);
+      }
       await audio.play();
       if (!source.cached && request === playbackRequest) {
-        void trackEngine.cache(track).catch(() => {});
+        void trackEngine.cache(track, { forceTranscode }).catch(() => {});
+      }
+    };
+
+    try {
+      try {
+        await playSource(forceTranscode);
+      } catch (caught) {
+        if (
+          forceTranscode ||
+          request !== playbackRequest ||
+          !unsupportedSource(caught)
+        )
+          throw caught;
+        playbackError = "";
+        playbackLoading = true;
+        await playSource(true);
       }
     } catch (caught) {
       if (request !== playbackRequest) return;
@@ -473,6 +517,7 @@
     audio.removeAttribute("src");
     audio.load();
     trackEngine.releaseSource();
+    playbackSourceCached = false;
     queueEngine.update({ tracks: queue, position: 0 });
     duration = 0;
     isPlaying = false;
@@ -540,11 +585,40 @@
     void playCurrent();
   }
 
+  async function cacheAndSeek(value: number) {
+    const track = queue[currentIndex];
+    if (!track) return;
+
+    const request = ++playbackRequest;
+    audio.pause();
+    playbackError = "";
+    playbackLoading = true;
+    try {
+      await trackEngine.cache(track, { forceTranscode: true });
+      if (request !== playbackRequest) return;
+      await playCurrent(value, true);
+    } catch (caught) {
+      if (request !== playbackRequest) return;
+      playbackLoading = false;
+      playbackError =
+        caught instanceof Error ? caught.message : "The track could not be loaded.";
+    }
+  }
+
   function seek(value: number) {
-    if (Number.isFinite(value)) {
+    if (!Number.isFinite(value)) return;
+
+    const buffered = Array.from(
+      { length: audio.buffered.length },
+      (_, index) => value >= audio.buffered.start(index) && value <= audio.buffered.end(index),
+    ).some(Boolean);
+
+    queueEngine.setPosition(value);
+    if (playbackSourceCached || buffered) {
       audio.currentTime = value;
-      queueEngine.setPosition(value);
       queueEngine.save();
+    } else {
+      void cacheAndSeek(value);
     }
   }
 
