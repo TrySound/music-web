@@ -248,26 +248,6 @@
       .flatMap((album) => albumQueueItems(artist, album));
   }
 
-  function visibleTracks(album: Album) {
-    return offlineMode
-      ? tracksFor(album)
-          .filter((track) => trackEngine.getStatus(track.id) === "downloaded")
-      : tracksFor(album);
-  }
-
-  function visibleAlbums(artist: Artist) {
-    return offlineMode
-      ? albumsFor(artist)
-          .filter((album) => visibleTracks(album).length > 0)
-      : albumsFor(artist);
-  }
-
-  function visibleArtists() {
-    return offlineMode
-      ? artists.filter((artist) => visibleAlbums(artist).length > 0)
-      : artists;
-  }
-
   function availableQueueItems(items: QueueItem[]) {
     return offlineMode
       ? items.filter(
@@ -1044,6 +1024,14 @@
   {/snippet}
 
   {#snippet libraryRoute(_params: RouteParams, router: RouteControls)}
+    {@const visibleArtists = offlineMode
+      ? artists.filter((artist) =>
+          artistQueueItems(artist).some(
+            (track) => trackEngine.getStatus(track.id) === "downloaded",
+          ),
+        )
+      : artists}
+
     <header class="topbar">
       <span class="topbar-spacer"></span>
       <strong>Library</strong>
@@ -1062,7 +1050,7 @@
             <span class="eyebrow">
               {offlineMode ? "Downloaded music" : "Your music"}
             </span>
-            <h2>{visibleArtists().length} artists</h2>
+            <h2>{visibleArtists.length} artists</h2>
           </div>
         </div>
 
@@ -1071,9 +1059,9 @@
             <div class="scan-spinner">{@render icon("loading")}</div>
             <p>Checking downloaded music…</p>
           </div>
-        {:else if visibleArtists().length > 0}
+        {:else if visibleArtists.length > 0}
           <div class="artist-grid">
-            {#each visibleArtists() as artist}
+            {#each visibleArtists as artist}
               <article class="artist-card">
                 <a class="artist-main" href={router.href(artistPath(artist))}>
                   <span class="cover artist-cover">
@@ -1126,6 +1114,15 @@
     {@const artist = params.artistId
       ? metadataEngine.getArtist(params.artistId)
       : undefined}
+    {@const visibleAlbums = artist
+      ? offlineMode
+        ? albumsFor(artist).filter((album) =>
+            tracksFor(album).some(
+              (track) => trackEngine.getStatus(track.id) === "downloaded",
+            ),
+          )
+        : albumsFor(artist)
+      : []}
 
     <header class="topbar">
       <a class="topbar-icon" href={router.href("/library")} title="Back"
@@ -1148,7 +1145,7 @@
             <span class="eyebrow">Albums</span>
             <h2>{artist.name}</h2>
             <p class="library-meta">
-              {visibleAlbums(artist).length} album{visibleAlbums(artist).length === 1
+              {visibleAlbums.length} album{visibleAlbums.length === 1
                 ? ""
                 : "s"}
             </p>
@@ -1183,7 +1180,12 @@
           </div>
         {:else}
           <div class="album-list">
-            {#each visibleAlbums(artist) as album}
+            {#each visibleAlbums as album}
+              {@const visibleTracks = offlineMode
+                ? tracksFor(album).filter(
+                    (track) => trackEngine.getStatus(track.id) === "downloaded",
+                  )
+                : tracksFor(album)}
               <article class="album-row">
                 <a class="album-main" href={router.href(albumPath(artist, album))}>
                   <span class="cover album-cover">
@@ -1203,7 +1205,7 @@
                   </span>
                   <span class="album-copy">
                     <strong>{album.name}</strong>
-                    <small>{album.year ?? "Unknown year"} · {visibleTracks(album).length} tracks</small>
+                    <small>{album.year ?? "Unknown year"} · {visibleTracks.length} tracks</small>
                   </span>
                 </a>
                 <button
@@ -1253,6 +1255,13 @@
     {@const album = params.albumId
       ? metadataEngine.getAlbum(params.albumId)
       : undefined}
+    {@const visibleTracks = album
+      ? offlineMode
+        ? tracksFor(album).filter(
+            (track) => trackEngine.getStatus(track.id) === "downloaded",
+          )
+        : tracksFor(album)
+      : []}
 
     <header class="topbar">
       <a
@@ -1277,8 +1286,8 @@
             <span class="eyebrow">{artist.name}</span>
             <h2>{album.name}</h2>
             <p class="library-meta">
-              {artist.name} · {album.year ?? "Unknown year"} · {visibleTracks(album).length}
-              track{visibleTracks(album).length === 1 ? "" : "s"}
+              {artist.name} · {album.year ?? "Unknown year"} · {visibleTracks.length}
+              track{visibleTracks.length === 1 ? "" : "s"}
             </p>
             {#if albumGenres(album).length > 0}
               <div class="genre-list">
@@ -1311,7 +1320,7 @@
           </div>
         {:else}
           <div class="track-list">
-            {#each visibleTracks(album) as track, index}
+            {#each visibleTracks as track, index}
               <div class="track-row">
                 <button
                   type="button"
