@@ -1,4 +1,4 @@
-import { createSubscriber } from 'svelte/reactivity';
+import { createSubscriber } from "svelte/reactivity";
 
 export interface TrackEngineAuth {
   host: string;
@@ -17,7 +17,7 @@ export interface TrackSource {
   url: string;
 }
 
-export type TrackStatus = 'idle' | 'downloading' | 'downloaded';
+export type TrackStatus = "idle" | "downloading" | "downloaded";
 
 export interface TrackEngineOptions {
   auth?: TrackEngineAuth;
@@ -35,11 +35,11 @@ interface TrackStore {
 }
 
 export class TrackEngine {
-  #activeObjectUrl = '';
+  #activeObjectUrl = "";
   #auth?: TrackEngineAuth;
   #downloads = new Map<string, Promise<File>>();
   #statuses = new Map<string, TrackStatus>();
-  #mediaProbe = document.createElement('audio');
+  #mediaProbe = document.createElement("audio");
   #sourceRequest = 0;
   #store: TrackStore;
   #update = () => {};
@@ -58,47 +58,48 @@ export class TrackEngine {
   #clearObjectUrl() {
     if (!this.#activeObjectUrl) return;
     URL.revokeObjectURL(this.#activeObjectUrl);
-    this.#activeObjectUrl = '';
+    this.#activeObjectUrl = "";
   }
 
   #describe(track: EngineTrack): StreamDescriptor {
-    if (!this.#auth) throw new Error('No active Navidrome connection.');
+    if (!this.#auth) throw new Error("No active Navidrome connection.");
 
-    const format = track.contentType && this.#mediaProbe.canPlayType(track.contentType) ? 'raw' : 'mp3';
-    const contentType = format === 'raw' && track.contentType ? track.contentType : 'audio/mpeg';
+    const format =
+      track.contentType && this.#mediaProbe.canPlayType(track.contentType) ? "raw" : "mp3";
+    const contentType = format === "raw" && track.contentType ? track.contentType : "audio/mpeg";
     const query = new URLSearchParams({
       id: track.id,
       u: this.#auth.username,
       t: this.#auth.token,
       s: this.#auth.salt,
-      v: '1.16.1',
-      c: 'navidrome-artists',
+      v: "1.16.1",
+      c: "navidrome-artists",
       format,
-      estimateContentLength: 'true'
+      estimateContentLength: "true",
     });
 
     return {
       cacheKey: `${this.#auth.host}\n${this.#auth.username}\n${track.id}\n${format}-v1`,
       contentType,
-      url: `${this.#auth.host}/rest/stream.view?${query}`
+      url: `${this.#auth.host}/rest/stream.view?${query}`,
     };
   }
 
   async #download(track: EngineTrack, descriptor: StreamDescriptor) {
     const cached = await this.#store.get(descriptor.cacheKey);
     if (cached) {
-      this.#statuses.set(track.id, 'downloaded');
+      this.#statuses.set(track.id, "downloaded");
       this.#update();
       return cached;
     }
 
-    this.#statuses.set(track.id, 'downloading');
+    this.#statuses.set(track.id, "downloading");
     this.#update();
     try {
       const response = await fetch(descriptor.url);
       if (!response.ok) throw new Error(`The server returned HTTP ${response.status}.`);
       const file = await this.#store.put(descriptor.cacheKey, response);
-      this.#statuses.set(track.id, 'downloaded');
+      this.#statuses.set(track.id, "downloaded");
       this.#update();
       return file;
     } catch (error) {
@@ -113,8 +114,9 @@ export class TrackEngine {
     const activeDownload = this.#downloads.get(descriptor.cacheKey);
     if (activeDownload) return activeDownload;
 
-    const download = this.#download(track, descriptor)
-      .finally(() => this.#downloads.delete(descriptor.cacheKey));
+    const download = this.#download(track, descriptor).finally(() =>
+      this.#downloads.delete(descriptor.cacheKey),
+    );
     this.#downloads.set(descriptor.cacheKey, download);
     return download;
   }
@@ -127,8 +129,8 @@ export class TrackEngine {
       while (nextTrack < tracks.length) {
         const track = tracks[nextTrack++];
         const cached = await this.#store.get(this.#describe(track).cacheKey);
-        if (cached && this.#statuses.get(track.id) !== 'downloaded') {
-          this.#statuses.set(track.id, 'downloaded');
+        if (cached && this.#statuses.get(track.id) !== "downloaded") {
+          this.#statuses.set(track.id, "downloaded");
           changed = true;
         }
       }
@@ -140,7 +142,7 @@ export class TrackEngine {
 
   getStatus(trackId: string): TrackStatus {
     this.#subscribe();
-    return this.#statuses.get(trackId) ?? 'idle';
+    return this.#statuses.get(trackId) ?? "idle";
   }
 
   async getSource(track: EngineTrack): Promise<TrackSource> {
@@ -148,15 +150,17 @@ export class TrackEngine {
     const descriptor = this.#describe(track);
     const cached = await this.#store.get(descriptor.cacheKey);
     if (request !== this.#sourceRequest) {
-      throw new DOMException('Source request superseded.', 'AbortError');
+      throw new DOMException("Source request superseded.", "AbortError");
     }
 
     this.#clearObjectUrl();
     if (!cached) return { cached: false, url: descriptor.url };
 
-    this.#statuses.set(track.id, 'downloaded');
+    this.#statuses.set(track.id, "downloaded");
     this.#update();
-    this.#activeObjectUrl = URL.createObjectURL(new Blob([cached], { type: descriptor.contentType }));
+    this.#activeObjectUrl = URL.createObjectURL(
+      new Blob([cached], { type: descriptor.contentType }),
+    );
     return { cached: true, url: this.#activeObjectUrl };
   }
 
@@ -166,8 +170,8 @@ export class TrackEngine {
   }
 
   setAuth(auth: TrackEngineAuth) {
-    const accountChanged = this.#auth
-      && (this.#auth.host !== auth.host || this.#auth.username !== auth.username);
+    const accountChanged =
+      this.#auth && (this.#auth.host !== auth.host || this.#auth.username !== auth.username);
     this.#auth = auth;
     if (accountChanged) {
       this.#statuses.clear();
@@ -183,13 +187,15 @@ export class TrackEngine {
 class OpfsTrackStore implements TrackStore {
   async #directory() {
     const root = await navigator.storage.getDirectory();
-    return root.getDirectoryHandle('tracks', { create: true });
+    return root.getDirectoryHandle("tracks", { create: true });
   }
 
   async #fileName(key: string) {
     const data = new TextEncoder().encode(key);
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    const hash = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
     return `${hash}.audio`;
   }
 
@@ -199,7 +205,7 @@ class OpfsTrackStore implements TrackStore {
       const handle = await cache.getFileHandle(await this.#fileName(key));
       return await handle.getFile();
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'NotFoundError') return null;
+      if (error instanceof DOMException && error.name === "NotFoundError") return null;
       throw error;
     }
   }

@@ -9,13 +9,13 @@ export interface CachedImage {
 
 async function cacheFileName(key: string) {
   const data = new TextEncoder().encode(key);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function cacheDirectory() {
   const root = await navigator.storage.getDirectory();
-  return root.getDirectoryHandle('images', { create: true });
+  return root.getDirectoryHandle("images", { create: true });
 }
 
 export async function getCachedImage(key: string): Promise<CachedImage | null> {
@@ -25,26 +25,27 @@ export async function getCachedImage(key: string): Promise<CachedImage | null> {
   try {
     const [imageHandle, metadataHandle] = await Promise.all([
       directory.getFileHandle(`${name}.image`),
-      directory.getFileHandle(`${name}.json`)
+      directory.getFileHandle(`${name}.json`),
     ]);
     const [file, metadata] = await Promise.all([
       imageHandle.getFile(),
-      metadataHandle.getFile().then(async (value) =>
-        JSON.parse(await value.text()) as {
-          etag?: string;
-          lastModified?: string;
-          type?: string;
-        }
-      )
+      metadataHandle.getFile().then(
+        async (value) =>
+          JSON.parse(await value.text()) as {
+            etag?: string;
+            lastModified?: string;
+            type?: string;
+          },
+      ),
     ]);
     return {
       etag: metadata.etag,
       file,
       lastModified: metadata.lastModified,
-      type: metadata.type ?? 'image/jpeg'
+      type: metadata.type ?? "image/jpeg",
     };
   } catch (caught) {
-    if (caught instanceof DOMException && caught.name === 'NotFoundError') return null;
+    if (caught instanceof DOMException && caught.name === "NotFoundError") return null;
     throw caught;
   }
 }
@@ -63,8 +64,8 @@ async function downloadImage(key: string, url: string): Promise<CachedImage> {
   if (cached && !cached.etag && !cached.lastModified) return cached;
 
   const headers = new Headers();
-  if (cached?.etag) headers.set('If-None-Match', cached.etag);
-  if (cached?.lastModified) headers.set('If-Modified-Since', cached.lastModified);
+  if (cached?.etag) headers.set("If-None-Match", cached.etag);
+  if (cached?.lastModified) headers.set("If-Modified-Since", cached.lastModified);
 
   const response = await fetch(url, { headers });
   if (response.status === 304 && cached) return cached;
@@ -72,16 +73,16 @@ async function downloadImage(key: string, url: string): Promise<CachedImage> {
 
   const directory = await cacheDirectory();
   const name = await cacheFileName(key);
-  const type = response.headers.get('Content-Type') ?? 'image/jpeg';
-  const etag = response.headers.get('ETag') ?? undefined;
-  const lastModified = response.headers.get('Last-Modified') ?? undefined;
+  const type = response.headers.get("Content-Type") ?? "image/jpeg";
+  const etag = response.headers.get("ETag") ?? undefined;
+  const lastModified = response.headers.get("Last-Modified") ?? undefined;
   const [imageHandle, metadataHandle] = await Promise.all([
     directory.getFileHandle(`${name}.image`, { create: true }),
-    directory.getFileHandle(`${name}.json`, { create: true })
+    directory.getFileHandle(`${name}.json`, { create: true }),
   ]);
   const [imageWritable, metadataWritable] = await Promise.all([
     imageHandle.createWritable(),
-    metadataHandle.createWritable()
+    metadataHandle.createWritable(),
   ]);
 
   try {
@@ -94,7 +95,7 @@ async function downloadImage(key: string, url: string): Promise<CachedImage> {
           }),
       metadataWritable
         .write(JSON.stringify({ etag, lastModified, type }))
-        .then(() => metadataWritable.close())
+        .then(() => metadataWritable.close()),
     ]);
     return { etag, file: await imageHandle.getFile(), lastModified, type };
   } catch (caught) {
@@ -102,7 +103,7 @@ async function downloadImage(key: string, url: string): Promise<CachedImage> {
       imageWritable.abort().catch(() => {}),
       metadataWritable.abort().catch(() => {}),
       directory.removeEntry(`${name}.image`).catch(() => {}),
-      directory.removeEntry(`${name}.json`).catch(() => {})
+      directory.removeEntry(`${name}.json`).catch(() => {}),
     ]);
     throw caught;
   }
