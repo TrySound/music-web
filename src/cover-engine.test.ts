@@ -8,7 +8,10 @@ const auth = {
   salt: "salt",
 };
 
-function installOpfs(cached = false) {
+function installOpfs(
+  cached = false,
+  metadata: { etag?: string; lastModified?: string; type: string } = { type: "image/jpeg" },
+) {
   const files = new Map<string, File>();
   const handles = new Map<
     string,
@@ -24,7 +27,7 @@ function installOpfs(cached = false) {
         files.set(
           name,
           name.endsWith(".json")
-            ? new File([JSON.stringify({ type: "image/jpeg" })], name)
+            ? new File([JSON.stringify(metadata)], name)
             : new File(["image"], name),
         );
       }
@@ -98,10 +101,34 @@ describe("cover engine", () => {
     const engine = new CoverEngine();
     engine.setAuth(auth);
     const request = { candidates: ["cover-1"], allowNetwork: true };
+    const cover = engine.getCover(request);
 
-    expect(engine.getSource(request)).toBeUndefined();
-    await vi.waitFor(() => expect(engine.getSource(request)).toBe("blob:cached-cover"));
+    expect(cover.source).toBeUndefined();
+    expect(engine.getCover(request)).toBe(cover);
+    await vi.waitFor(() => expect(cover.source).toBe("blob:cached-cover"));
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("revalidates cached covers and publishes changed images", async () => {
+    installOpfs(true, { type: "image/jpeg", etag: '"old"' });
+    vi.spyOn(URL, "createObjectURL")
+      .mockReturnValueOnce("blob:cached-cover")
+      .mockReturnValueOnce("blob:updated-cover");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const fetcher = vi.fn(
+      async (..._arguments: Parameters<typeof fetch>) =>
+        new Response("updated", { headers: { "Content-Type": "image/jpeg" } }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const engine = new CoverEngine();
+    engine.setAuth(auth);
+    const request = { candidates: ["cover-1"], allowNetwork: true };
+
+    await vi.waitFor(() => expect(engine.getCover(request).source).toBe("blob:updated-cover"));
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("If-None-Match")).toBe('"old"');
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:cached-cover");
   });
 
   it("uses the first cached fallback", async () => {
@@ -114,7 +141,7 @@ describe("cover engine", () => {
       allowNetwork: false,
     };
 
-    await vi.waitFor(() => expect(engine.getSource(request)).toBe("blob:fallback-cover"));
+    await vi.waitFor(() => expect(engine.getCover(request).source).toBe("blob:fallback-cover"));
   });
 
   it("resolves a Navidrome URL and caches it after loading", async () => {
@@ -129,10 +156,11 @@ describe("cover engine", () => {
 
     let source: string | undefined;
     await vi.waitFor(() => {
-      source = engine.getSource(request);
+      source = engine.getCover(request).source;
       expect(source).toContain("/rest/getCoverArt.view?");
     });
-    expect(engine.cacheLoaded(source!)).toBeUndefined();
+    const cover = engine.getCover(request);
+    expect(cover.cache()).toBeUndefined();
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
   });
 
@@ -144,9 +172,9 @@ describe("cover engine", () => {
     engine.setAuth(auth);
     const request = { candidates: ["cover-1"], allowNetwork: false };
 
-    expect(engine.getSource(request)).toBeUndefined();
+    expect(engine.getCover(request).source).toBeUndefined();
     await new Promise((resolve) => setTimeout(resolve));
-    expect(engine.getSource(request)).toBeUndefined();
+    expect(engine.getCover(request).source).toBeUndefined();
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

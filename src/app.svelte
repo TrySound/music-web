@@ -303,12 +303,6 @@
     return [album.coverArt, ...album.tracks.map((track) => track.coverArt)];
   }
 
-  function cacheLoadedCoverArt(event: Event) {
-    coverEngine.cacheLoaded(
-      (event.currentTarget as HTMLImageElement).currentSrc,
-    );
-  }
-
   function directGenres(item: { genre?: string; genres?: { name: string }[] }) {
     const genres = [
       ...(item.genres?.map((genre) => genre.name) ?? []),
@@ -1194,15 +1188,15 @@
     <div class="player-main">
       <div class="artwork">
         {#if currentIndex >= 0 && queue[currentIndex]?.coverArt}
-          <img
-            src={coverEngine.getSource({
-              candidates: [queue[currentIndex].coverArt],
-              allowNetwork: !offlineMode,
-            })}
-            alt=""
-            loading="lazy"
-            onload={cacheLoadedCoverArt}
-          />
+          {@const cover = coverEngine.getCover({
+            candidates: [queue[currentIndex].coverArt],
+            allowNetwork: !offlineMode,
+          })}
+          {#if cover.source}
+            <img src={cover.source} alt="" loading="lazy" onload={cover.cache} />
+          {:else}
+            <span>{@render icon("music")}</span>
+          {/if}
         {:else}
           <span>{@render icon("music")}</span>
         {/if}
@@ -1485,15 +1479,15 @@
               <a class="album-main" href={albumRoute(selectedArtist, album)}>
                 <span class="cover album-cover">
                   {#if albumCoverArts(album).some(Boolean)}
-                    <img
-                      src={coverEngine.getSource({
-                        candidates: albumCoverArts(album),
-                        allowNetwork: !offlineMode,
-                      })}
-                      alt=""
-                      loading="lazy"
-                      onload={cacheLoadedCoverArt}
-                    />
+                    {@const cover = coverEngine.getCover({
+                      candidates: albumCoverArts(album),
+                      allowNetwork: !offlineMode,
+                    })}
+                    {#if cover.source}
+                      <img src={cover.source} alt="" loading="lazy" onload={cover.cache} />
+                    {:else}
+                      <span>{@render icon("music")}</span>
+                    {/if}
                   {:else}
                     <span>{@render icon("music")}</span>
                   {/if}
@@ -1541,15 +1535,15 @@
               <a class="artist-main" href={artistRoute(artist)}>
                 <span class="cover artist-cover">
                   {#if artistCoverArts(artist).some(Boolean)}
-                    <img
-                      src={coverEngine.getSource({
-                        candidates: artistCoverArts(artist),
-                        allowNetwork: !offlineMode,
-                      })}
-                      alt=""
-                      loading="lazy"
-                      onload={cacheLoadedCoverArt}
-                    />
+                    {@const cover = coverEngine.getCover({
+                      candidates: artistCoverArts(artist),
+                      allowNetwork: !offlineMode,
+                    })}
+                    {#if cover.source}
+                      <img src={cover.source} alt="" loading="lazy" onload={cover.cache} />
+                    {:else}
+                      <span>{@render icon("music")}</span>
+                    {/if}
                   {:else}
                     <span>{@render icon("music")}</span>
                   {/if}
@@ -1592,17 +1586,15 @@
     <a class="mini-player" href="#/player">
       <span class="mini-art">
         {#if queue[currentIndex >= 0 ? currentIndex : 0].coverArt}
-          <img
-            src={coverEngine.getSource({
-              candidates: [
-                queue[currentIndex >= 0 ? currentIndex : 0].coverArt,
-              ],
-              allowNetwork: !offlineMode,
-            })}
-            alt=""
-            loading="lazy"
-            onload={cacheLoadedCoverArt}
-          />
+          {@const cover = coverEngine.getCover({
+            candidates: [queue[currentIndex >= 0 ? currentIndex : 0].coverArt],
+            allowNetwork: !offlineMode,
+          })}
+          {#if cover.source}
+            <img src={cover.source} alt="" loading="lazy" onload={cover.cache} />
+          {:else}
+            <span>{@render icon("music")}</span>
+          {/if}
         {:else}
           <span>{@render icon("music")}</span>
         {/if}
