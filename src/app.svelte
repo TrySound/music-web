@@ -1,25 +1,17 @@
 <script lang="ts">
   import { md5 } from "js-md5";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { CoverEngine } from "./cover-engine";
-  import { loadLibraryCache, saveLibraryCache } from "./library-cache";
+  import {
+    MetadataEngine,
+    type Album,
+    type Artist,
+    type Track,
+  } from "./metadata-engine";
   import { TrackEngine } from "./track-engine";
 
   const authStorageKey = "navidrome-auth";
   const offlineModeStorageKey = "navidrome-offline-mode";
-
-  interface Track {
-    album?: string;
-    artist?: string;
-    contentType?: string;
-    coverArt?: string;
-    genre?: string;
-    genres?: { name: string }[];
-    discNumber?: number;
-    id: string;
-    title: string;
-    track?: number;
-  }
 
   interface QueueItem {
     album: string;
@@ -30,42 +22,9 @@
     title: string;
   }
 
-  interface Album {
-    artist?: string;
-    genre?: string;
-    genres?: { name: string }[];
-    artistId?: string;
-    coverArt?: string;
-    id: string;
-    name: string;
-    tracks: Track[];
-    year?: number;
-  }
-
-  type ApiAlbum = Omit<Album, "tracks">;
-
-  interface Artist {
-    albums: Album[];
-    genre?: string;
-    genres?: { name: string }[];
-    coverArt?: string;
-    id?: string;
-    name: string;
-  }
-
-  type ApiArtist = Omit<Artist, "albums">;
-
-  interface ArtistIndex {
-    artist?: ApiArtist[];
-  }
-
   interface SubsonicResponse {
     status: string;
     error?: { message?: string };
-    artists?: { index?: ArtistIndex[] };
-    albumList2?: { album?: ApiAlbum[] };
-    album?: { song?: Track[] };
-    indexes?: { lastModified?: number | string };
     playQueue?: {
       current?: string;
       entry?: Track[];
@@ -87,21 +46,22 @@
   type View = "library" | "player" | "settings";
   type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-  let activeView: View = "library";
-  let selectedArtist: Artist | null = null;
-  let selectedAlbum: Album | null = null;
-  let host = "";
-  let username = "";
-  let password = "";
-  let artists: Artist[] = [];
-  let queue: QueueItem[] = [];
-  let activeAuth: SavedAuth | null = null;
-  let currentIndex = -1;
-  let currentTime = 0;
-  let duration = 0;
-  let isPlaying = false;
-  let playbackLoading = false;
-  let playbackError = "";
+  let activeView = $state<View>("library");
+  let selectedArtist = $state<Artist | null>(null);
+  let selectedAlbum = $state<Album | null>(null);
+  let host = $state("");
+  let username = $state("");
+  let password = $state("");
+  const metadataEngine = new MetadataEngine();
+  let artists = $derived(metadataEngine.getArtists());
+  let queue = $state<QueueItem[]>([]);
+  let activeAuth = $state<SavedAuth | null>(null);
+  let currentIndex = $state(-1);
+  let currentTime = $state(0);
+  let duration = $state(0);
+  let isPlaying = $state(false);
+  let playbackLoading = $state(false);
+  let playbackError = $state("");
   let audio: HTMLAudioElement;
   const coverEngine = new CoverEngine();
   const trackEngine = new TrackEngine();
@@ -110,16 +70,25 @@
   let queueSaveTimer: ReturnType<typeof setTimeout> | undefined;
   let lastPositionSync = 0;
   let playbackRequest = 0;
-  let downloadingCollection = "";
-  let offlineMode = false;
-  let offlineScanning = false;
-  let loading = false;
-  let refreshing = false;
-  let refreshError = "";
-  let error = "";
-  let connectedHost = "";
-  let connectionStatus: ConnectionStatus = "disconnected";
-  let connectionOpen = false;
+  let downloadingCollection = $state("");
+  let offlineMode = $state(false);
+  let offlineScanning = $state(false);
+  let loading = $derived(metadataEngine.status === "loading");
+  let refreshing = $derived(metadataEngine.status === "refreshing");
+  let refreshError = $state("");
+  let error = $state("");
+  let connectedHost = $state("");
+  let connectionStatus = $state<ConnectionStatus>("disconnected");
+  let connectionOpen = $state(false);
+  let pendingAuth = $state<SavedAuth | null>(null);
+  let navigateAfterConnection = $state(false);
+
+  $effect(() => {
+    const status = metadataEngine.status;
+    if (status === "refreshing" || status === "ready") {
+      untrack(syncCurrentRoute);
+    }
+  });
 
   function normalizeHost(value: string) {
     const withProtocol = /^https?:\/\//i.test(value)
@@ -170,12 +139,10 @@
     selectedAlbum = null;
 
     if (parts[0] !== "library" || parts[1] !== "artist" || !parts[2]) return;
-    selectedArtist =
-      artists.find((artist) => (artist.id ?? artist.name) === parts[2]) ?? null;
+    selectedArtist = metadataEngine.getArtist(parts[2]) ?? null;
 
     if (selectedArtist && parts[3] === "album" && parts[4]) {
-      selectedAlbum =
-        selectedArtist.albums.find((album) => album.id === parts[4]) ?? null;
+      selectedAlbum = metadataEngine.getAlbum(parts[4]) ?? null;
     }
 
     if (selectedArtist) {
@@ -230,6 +197,7 @@
 
   onDestroy(() => {
     coverEngine.destroy();
+    metadataEngine.destroy();
     trackEngine.destroy();
   });
 
@@ -257,7 +225,7 @@
       trackEngine.setAuth(savedAuth);
       host = savedAuth.host;
       username = savedAuth.username;
-      void loadArtists(savedAuth);
+      loadArtists(savedAuth);
     } catch {
       localStorage.removeItem(authStorageKey);
       connectionOpen = true;
@@ -283,24 +251,37 @@
     return `${artistRoute(artist)}/album/${encodeURIComponent(album.id)}`;
   }
 
+  function albumsFor(artist: Artist) {
+    return metadataEngine.getArtist(artist.id ?? artist.name)?.albums ?? [];
+  }
+
+  function tracksFor(album: Album) {
+    return metadataEngine.getAlbum(album.id)?.tracks ?? [];
+  }
+
   function artistCoverArt(artist: Artist) {
     return (
-      artist.coverArt ?? artist.albums.find((album) => album.coverArt)?.coverArt
+      artist.coverArt ??
+      albumsFor(artist)
+        .find((album) => album.coverArt)?.coverArt
     );
   }
 
   function artistCoverArts(artist: Artist) {
     return [
       artist.coverArt,
-      ...artist.albums.flatMap((album) => [
+      ...albumsFor(artist).flatMap((album) => [
         album.coverArt,
-        ...album.tracks.map((track) => track.coverArt),
+        ...tracksFor(album).map((track) => track.coverArt),
       ]),
     ];
   }
 
   function albumCoverArts(album: Album) {
-    return [album.coverArt, ...album.tracks.map((track) => track.coverArt)];
+    return [
+      album.coverArt,
+      ...tracksFor(album).map((track) => track.coverArt),
+    ];
   }
 
   function directGenres(item: { genre?: string; genres?: { name: string }[] }) {
@@ -325,19 +306,20 @@
   function albumGenres(album: Album) {
     return uniqueGenres([
       ...directGenres(album),
-      ...album.tracks.flatMap(directGenres),
+      ...tracksFor(album).flatMap(directGenres),
     ]);
   }
 
   function artistGenres(artist: Artist) {
     return uniqueGenres([
       ...directGenres(artist),
-      ...artist.albums.flatMap(albumGenres),
+      ...albumsFor(artist)
+        .flatMap(albumGenres),
     ]);
   }
 
   function albumQueueItems(artist: Artist, album: Album): QueueItem[] {
-    return album.tracks.map((track) => ({
+    return tracksFor(album).map((track) => ({
       album: album.name,
       artist: artist.name,
       contentType: track.contentType,
@@ -348,21 +330,22 @@
   }
 
   function artistQueueItems(artist: Artist): QueueItem[] {
-    return artist.albums.flatMap((album) => albumQueueItems(artist, album));
+    return albumsFor(artist)
+      .flatMap((album) => albumQueueItems(artist, album));
   }
 
   function visibleTracks(album: Album) {
     return offlineMode
-      ? album.tracks.filter(
-          (track) => trackEngine.getStatus(track.id) === "downloaded",
-        )
-      : album.tracks;
+      ? tracksFor(album)
+          .filter((track) => trackEngine.getStatus(track.id) === "downloaded")
+      : tracksFor(album);
   }
 
   function visibleAlbums(artist: Artist) {
     return offlineMode
-      ? artist.albums.filter((album) => visibleTracks(album).length > 0)
-      : artist.albums;
+      ? albumsFor(artist)
+          .filter((album) => visibleTracks(album).length > 0)
+      : albumsFor(artist);
   }
 
   function visibleArtists() {
@@ -503,10 +486,11 @@
     offlineMode = enabled;
     localStorage.setItem(offlineModeStorageKey, String(enabled));
 
+    metadataEngine.setNetwork(enabled ? "offline" : "online");
     if (enabled) await scanOfflineLibrary();
     else if (activeAuth) {
       loadedQueueKey = "";
-      void loadArtists(activeAuth);
+      loadArtists(activeAuth);
     }
   }
 
@@ -727,166 +711,6 @@
     return `${minutes}:${String(seconds).padStart(2, "0")}`;
   }
 
-  async function loadAlbums(server: string, authQuery: URLSearchParams) {
-    const albums: ApiAlbum[] = [];
-    const pageSize = 500;
-
-    for (let offset = 0; ; offset += pageSize) {
-      const query = new URLSearchParams(authQuery);
-      query.set("type", "alphabeticalByArtist");
-      query.set("size", String(pageSize));
-      query.set("offset", String(offset));
-
-      const response = await fetch(
-        `${server}/rest/getAlbumList2.view?${query}`,
-      );
-      if (!response.ok)
-        throw new Error(`The server returned HTTP ${response.status}.`);
-
-      const body: SubsonicEnvelope = await response.json();
-      const result = body["subsonic-response"];
-      if (!result)
-        throw new Error("The server returned an unexpected response.");
-      if (result.status !== "ok") {
-        throw new Error(
-          result.error?.message || "Navidrome rejected the request.",
-        );
-      }
-
-      const page = result.albumList2?.album ?? [];
-      albums.push(...page);
-      if (page.length < pageSize) return albums;
-    }
-  }
-
-  async function loadTracks(
-    server: string,
-    authQuery: URLSearchParams,
-    albums: ApiAlbum[],
-  ) {
-    const tracksByAlbumId = new Map<string, Track[]>();
-    let nextAlbum = 0;
-
-    async function worker() {
-      while (nextAlbum < albums.length) {
-        const album = albums[nextAlbum++];
-        const query = new URLSearchParams(authQuery);
-        query.set("id", album.id);
-
-        const response = await fetch(`${server}/rest/getAlbum.view?${query}`);
-        if (!response.ok)
-          throw new Error(`The server returned HTTP ${response.status}.`);
-
-        const body: SubsonicEnvelope = await response.json();
-        const result = body["subsonic-response"];
-        if (!result)
-          throw new Error("The server returned an unexpected response.");
-        if (result.status !== "ok") {
-          throw new Error(
-            result.error?.message || "Navidrome rejected the request.",
-          );
-        }
-
-        const tracks = result.album?.song ?? [];
-        tracksByAlbumId.set(
-          album.id,
-          tracks.sort(
-            (a, b) =>
-              (a.discNumber ?? 1) - (b.discNumber ?? 1) ||
-              (a.track ?? Number.MAX_SAFE_INTEGER) -
-                (b.track ?? Number.MAX_SAFE_INTEGER) ||
-              a.title.localeCompare(b.title),
-          ),
-        );
-      }
-    }
-
-    await Promise.all(
-      Array.from({ length: Math.min(6, albums.length) }, () => worker()),
-    );
-    return tracksByAlbumId;
-  }
-
-  async function getLastModified(
-    server: string,
-    authQuery: URLSearchParams,
-    cachedLastModified?: number,
-  ) {
-    const query = new URLSearchParams(authQuery);
-    if (cachedLastModified !== undefined) {
-      query.set("ifModifiedSince", String(cachedLastModified));
-    }
-
-    const response = await fetch(`${server}/rest/getIndexes.view?${query}`);
-    if (!response.ok)
-      throw new Error(`The server returned HTTP ${response.status}.`);
-
-    const body: SubsonicEnvelope = await response.json();
-    const result = body["subsonic-response"];
-    if (!result) throw new Error("The server returned an unexpected response.");
-    if (result.status !== "ok") {
-      throw new Error(
-        result.error?.message || "Navidrome rejected the request.",
-      );
-    }
-
-    if (!result.indexes) return cachedLastModified ?? null;
-    const lastModified = Number(result.indexes.lastModified);
-    return Number.isFinite(lastModified) ? lastModified : null;
-  }
-
-  async function fetchLibrary(server: string, authQuery: URLSearchParams) {
-    const response = await fetch(`${server}/rest/getArtists.view?${authQuery}`);
-    if (!response.ok)
-      throw new Error(`The server returned HTTP ${response.status}.`);
-
-    const body: SubsonicEnvelope = await response.json();
-    const result = body["subsonic-response"];
-    if (!result) throw new Error("The server returned an unexpected response.");
-    if (result.status !== "ok") {
-      throw new Error(
-        result.error?.message || "Navidrome rejected the request.",
-      );
-    }
-
-    const apiAlbums = await loadAlbums(server, authQuery);
-    const tracksByAlbumId = await loadTracks(server, authQuery, apiAlbums);
-    const albumsByArtistId = new Map<string, Album[]>();
-    const albumsByArtistName = new Map<string, Album[]>();
-
-    for (const apiAlbum of apiAlbums) {
-      const album: Album = {
-        ...apiAlbum,
-        tracks: tracksByAlbumId.get(apiAlbum.id) ?? [],
-      };
-      const map = album.artistId ? albumsByArtistId : albumsByArtistName;
-      const key = album.artistId ?? album.artist;
-      if (!key) continue;
-      map.set(key, [...(map.get(key) ?? []), album]);
-    }
-
-    const indexes = result.artists?.index ?? [];
-    return indexes
-      .flatMap((index) => index.artist ?? [])
-      .map((artist) => ({
-        ...artist,
-        albums:
-          (artist.id ? albumsByArtistId.get(artist.id) : undefined) ??
-          albumsByArtistName.get(artist.name) ??
-          [],
-      }))
-      .map((artist) => ({
-        ...artist,
-        albums: artist.albums.sort(
-          (a, b) =>
-            (a.year ?? Number.MAX_SAFE_INTEGER) -
-              (b.year ?? Number.MAX_SAFE_INTEGER) ||
-            a.name.localeCompare(b.name),
-        ),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }
-
   function connectionStatusLabel() {
     if (offlineMode) return "Offline mode";
     if (connectionStatus === "connected") return "Connected";
@@ -902,117 +726,88 @@
     return caught instanceof Error ? caught.message : "Could not load artists.";
   }
 
-  async function submitConnection(event: SubmitEvent) {
+  function submitConnection(event: SubmitEvent) {
     event.preventDefault();
-    await loadArtists();
-    if (!error) {
-      connectionOpen = false;
-      navigateTo("#/library");
-    }
+    navigateAfterConnection = true;
+    loadArtists();
   }
 
-  async function loadArtists(savedAuth?: SavedAuth, forceRefresh = false) {
-    loading = true;
+  function loadArtists(savedAuth?: SavedAuth, forceRefresh = false) {
     connectionStatus = "connecting";
-    refreshing = false;
     error = "";
     refreshError = "";
-
-    let hasCachedLibrary = false;
 
     try {
       const server = normalizeHost(savedAuth?.host ?? host.trim());
       const requestUsername = savedAuth?.username ?? username;
       const salt = savedAuth?.salt ?? createSalt();
       const token = savedAuth?.token ?? md5(password + salt);
-      const credentials = {
-        host: server,
-        username: requestUsername,
-        token,
-        salt,
-      };
-      const cacheKey = `${server}\n${requestUsername}`;
-      const query = new URLSearchParams({
-        u: requestUsername,
-        t: token,
-        s: salt,
-        v: "1.16.1",
-        c: "navidrome-artists",
-        f: "json",
-      });
+      const credentials = { host: server, username: requestUsername, token, salt };
 
-      const cached = await loadLibraryCache<Artist[]>(cacheKey).catch(
-        () => null,
-      );
-      if (cached) {
-        hasCachedLibrary = true;
-        artists = cached.data;
-        connectedHost = server;
-        syncCurrentRoute();
-        loading = false;
-        refreshing = true;
-      } else {
-        artists = [];
-        connectedHost = "";
-      }
-
-      if (offlineMode) {
-        activeAuth = credentials;
-        coverEngine.setAuth(credentials);
-        trackEngine.setAuth(credentials);
-        connectionStatus = "disconnected";
-        if (!cached) throw new Error("No cached library is available offline.");
-        await scanOfflineLibrary();
-        return;
-      }
-
-      const lastModified = await getLastModified(
-        server,
-        query,
-        cached?.lastModified,
-      );
-      activeAuth = credentials;
-      coverEngine.setAuth(credentials);
-      trackEngine.setAuth(credentials);
-      connectionStatus = "connected";
-      localStorage.setItem(authStorageKey, JSON.stringify(credentials));
-
-      if (loadedQueueKey !== cacheKey) {
-        try {
-          await loadServerQueue(server, query);
-          loadedQueueKey = cacheKey;
-        } catch {
-          playbackError = "The saved Navidrome queue could not be loaded.";
-        }
-      }
-
-      if (!forceRefresh && cached && lastModified === cached.lastModified)
-        return;
-
-      refreshing = hasCachedLibrary;
-      const freshArtists = await fetchLibrary(server, query);
-      await saveLibraryCache(cacheKey, {
-        data: freshArtists,
-        lastModified: lastModified ?? 0,
-        savedAt: Date.now(),
-      });
-
-      artists = freshArtists;
-      connectedHost = server;
-      syncCurrentRoute();
+      pendingAuth = credentials;
+      metadataEngine.setNetwork(offlineMode ? "offline" : "online");
+      metadataEngine.setAuth(credentials);
+      if (forceRefresh) metadataEngine.refresh();
     } catch (caught) {
+      pendingAuth = null;
       connectionStatus = "error";
-      const message = connectionError(caught);
-      if (hasCachedLibrary) {
-        refreshError = `Background refresh failed: ${message}`;
-      } else {
-        error = message;
-      }
-    } finally {
-      loading = false;
-      refreshing = false;
+      error = connectionError(caught);
     }
   }
+
+  $effect(() => {
+    const credentials = pendingAuth;
+    const status = metadataEngine.status;
+    if (!credentials || (status !== "ready" && status !== "error")) return;
+
+    pendingAuth = null;
+    if (status === "error") {
+      connectionStatus = "error";
+      error = connectionError(metadataEngine.error);
+      return;
+    }
+
+    activeAuth = credentials;
+    coverEngine.setAuth(credentials);
+    trackEngine.setAuth(credentials);
+    connectedHost = credentials.host;
+    syncCurrentRoute();
+
+    if (metadataEngine.warning) {
+      connectionStatus = "error";
+      refreshError = `Background refresh failed: ${connectionError(metadataEngine.warning)}`;
+    } else if (offlineMode) {
+      connectionStatus = "disconnected";
+      scanOfflineLibrary().catch(() => {});
+    } else {
+      connectionStatus = "connected";
+      localStorage.setItem(authStorageKey, JSON.stringify(credentials));
+      const cacheKey = `${credentials.host}\n${credentials.username}`;
+      if (loadedQueueKey !== cacheKey) {
+        const query = new URLSearchParams({
+          u: credentials.username,
+          t: credentials.token,
+          s: credentials.salt,
+          v: "1.16.1",
+          c: "navidrome-artists",
+          f: "json",
+        });
+        loadServerQueue(credentials.host, query)
+          .then(() => {
+            loadedQueueKey = cacheKey;
+          })
+          .catch(() => {
+            playbackError = "The saved Navidrome queue could not be loaded.";
+          });
+      }
+    }
+
+    if (navigateAfterConnection) {
+      navigateAfterConnection = false;
+      connectionOpen = false;
+      navigateTo("#/library");
+    }
+  });
 </script>
 
 <svelte:head>
@@ -1181,7 +976,7 @@
   {/if}
 
   {#if refreshError}
-    <p class="error">{refreshError} Cached metadata is still being shown.</p>
+    <p class="error">{refreshError} Your existing library is still available.</p>
   {/if}
 
   <section class="view player-view" class:hidden={activeView !== "player"}>

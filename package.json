@@ -28,7 +28,7 @@
     "vitest": "4.1.11"
   },
   "nano-staged": {
-    "*.{css,svelte,ts}": "oxfmt --write"
+    "*.{css,svelte,ts}": "oxfmt --no-error-on-unmatched-pattern --write"
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm exec nano-staged"
