@@ -717,7 +717,7 @@
   {#snippet settingsRoute(_params: RouteParams, router: RouteControls)}
     <header class="topbar">
       <span class="topbar-spacer"></span>
-      <strong>Settings</strong>
+      <strong class="type-title">Settings</strong>
       <a class="topbar-icon" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
@@ -725,9 +725,9 @@
     {@render alerts()}
 
     <section class="view settings-view">
-    <span class="eyebrow">Settings</span>
-    <h2>{activeAuth ? "Music server" : "Connect to your music"}</h2>
-    <p class="muted">
+    <span class="type-eyebrow muted">Settings</span>
+    <h2 class="type-heading">{activeAuth ? "Music server" : "Connect to your music"}</h2>
+    <p class="type-body muted">
       {activeAuth
         ? "Manage the server used for your library."
         : "Enter your Navidrome server details. Authentication stays on this device."}
@@ -743,8 +743,8 @@
           class:failed={!offlineMode && connectionStatus === "error"}
         ></span>
         <span class="connection-summary stack-xs">
-          <strong>{activeAuth?.host ?? "Add a server"}</strong>
-          <small>
+          <strong class="type-title">{activeAuth?.host ?? "Add a server"}</strong>
+          <small class="type-small muted">
             {activeAuth
               ? `${activeAuth.username} · ${connectionStatusLabel()}`
               : "Navidrome connection"}
@@ -755,7 +755,7 @@
 
       <div class="connection-details">
         {#if activeAuth}
-          <div class="connection-status">
+          <div class="connection-status type-small">
             <span>Status</span>
             <strong>{connectionStatusLabel()}</strong>
           </div>
@@ -771,7 +771,7 @@
                 ? "Refreshing…"
                 : "Refresh library data"}
           </button>
-          <h3>Edit connection</h3>
+          <h3 class="type-title">Edit connection</h3>
         {/if}
 
         <form class="stack-md" onsubmit={submitConnection}>
@@ -823,8 +823,8 @@
 
     <div class="settings-option">
       <div class="stack-xs">
-        <strong>Offline library</strong>
-        <small>
+        <strong class="type-title">Offline library</strong>
+        <small class="type-small muted">
           {offlineScanning
             ? "Checking downloaded tracks…"
             : "Show only music downloaded to this device."}
@@ -846,11 +846,11 @@
 
   {#snippet alerts()}
     {#if error}
-      <p class="error" role="alert">{error}</p>
+      <p class="error type-small" role="alert">{error}</p>
     {/if}
 
     {#if refreshError}
-      <p class="error">{refreshError} Your existing library is still available.</p>
+      <p class="error type-small">{refreshError} Your existing library is still available.</p>
     {/if}
   {/snippet}
 
@@ -863,7 +863,7 @@
         title="Back"
         >{@render icon("back")}</button
       >
-      <strong>Now playing</strong>
+      <strong class="type-title">Now playing</strong>
       <a class="topbar-icon" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
@@ -889,8 +889,8 @@
       </div>
 
       {#if currentIndex >= 0 && queue[currentIndex]}
-        <p>
-          <strong>{queue[currentIndex].title}</strong><br />
+        <p class="type-body">
+          <strong class="type-heading">{queue[currentIndex].title}</strong><br />
           {queue[currentIndex].artist} — {queue[currentIndex].album}
         </p>
       {/if}
@@ -906,7 +906,7 @@
           disabled={!duration}
           oninput={(event) => seek(event.currentTarget.valueAsNumber)}
         />
-        <div class="playback-time">
+        <div class="playback-time type-caption">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
         </div>
@@ -943,15 +943,15 @@
       </div>
 
       {#if playbackError}
-        <p class="error">{playbackError}</p>
+        <p class="error type-small">{playbackError}</p>
       {/if}
     </div>
 
     <div class="player-queue">
       <div class="section-heading">
         <div>
-          <span class="eyebrow">Up next</span>
-          <h2>{queue.length} track{queue.length === 1 ? "" : "s"}</h2>
+          <span class="type-eyebrow muted">Up next</span>
+          <h2 class="type-heading">{queue.length} track{queue.length === 1 ? "" : "s"}</h2>
         </div>
         {#if queue.length > 0}
           <button type="button" class="quiet" onclick={clearQueue}>Clear</button
@@ -992,7 +992,7 @@
           {/each}
         </div>
       {:else}
-        <p class="muted">The queue is empty.</p>
+        <p class="type-body muted">The queue is empty.</p>
       {/if}
     </div>
     </section>
@@ -1009,7 +1009,7 @@
 
     <header class="topbar">
       <span class="topbar-spacer"></span>
-      <strong>Library</strong>
+      <strong class="type-title">Library</strong>
       <a
         class="topbar-icon"
         href={router.href("/settings")}
@@ -1022,17 +1022,17 @@
       {#if connectedHost && !error}
         <div class="section-heading">
           <div>
-            <span class="eyebrow">
+            <span class="type-eyebrow muted">
               {offlineMode ? "Downloaded music" : "Your music"}
             </span>
-            <h2>{visibleArtists.length} artists</h2>
+            <h2 class="type-heading">{visibleArtists.length} artists</h2>
           </div>
         </div>
 
         {#if offlineScanning}
           <div class="empty-state">
             <div class="scan-spinner">{@render icon("loading")}</div>
-            <p>Checking downloaded music…</p>
+            <p class="type-body">Checking downloaded music…</p>
           </div>
         {:else if visibleArtists.length > 0}
           <div class="artist-grid">
@@ -1053,7 +1053,7 @@
                     {:else}
                       <span>{@render icon("music")}</span>
                     {/if}
-                    <strong class="artist-name">{artist.name}</strong>
+                    <strong class="artist-name type-small">{artist.name}</strong>
                   </span>
                 </a>
                 <button
@@ -1075,7 +1075,7 @@
         {:else}
           <div class="empty-state">
             <span>{@render icon("music")}</span>
-            <p>{offlineMode ? "No downloaded artists." : "No artists found."}</p>
+            <p class="type-body">{offlineMode ? "No downloaded artists." : "No artists found."}</p>
           </div>
         {/if}
       {:else if !loading}
@@ -1103,7 +1103,7 @@
       <a class="topbar-icon" href={router.href("/library")} title="Back"
         >{@render icon("back")}</a
       >
-      <strong>Library</strong>
+      <strong class="type-title">Library</strong>
       <a class="topbar-icon" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
@@ -1117,16 +1117,16 @@
       {#if connectedHost && !error && artist}
         <div class="section-heading">
           <div>
-            <span class="eyebrow">Albums</span>
-            <h2>{artist.name}</h2>
-            <p class="library-meta">
+            <span class="type-eyebrow muted">Albums</span>
+            <h2 class="type-heading">{artist.name}</h2>
+            <p class="library-meta type-small">
               {visibleAlbums.length} album{visibleAlbums.length === 1
                 ? ""
                 : "s"}
             </p>
             {#if artistGenres(artist).length > 0}
               <div class="genre-list">
-                {#each artistGenres(artist) as genre}<span>{genre}</span>{/each}
+                {#each artistGenres(artist) as genre}<span class="type-caption">{genre}</span>{/each}
               </div>
             {/if}
           </div>
@@ -1151,7 +1151,7 @@
         {#if offlineScanning}
           <div class="empty-state">
             <div class="scan-spinner">{@render icon("loading")}</div>
-            <p>Checking downloaded music…</p>
+            <p class="type-body">Checking downloaded music…</p>
           </div>
         {:else}
           <div class="album-list">
@@ -1179,8 +1179,8 @@
                     {/if}
                   </span>
                   <span class="album-copy stack-xs">
-                    <strong>{album.name}</strong>
-                    <small>{album.year ?? "Unknown year"} · {visibleTracks.length} tracks</small>
+                    <strong class="type-title">{album.name}</strong>
+                    <small class="type-small muted">{album.year ?? "Unknown year"} · {visibleTracks.length} tracks</small>
                   </span>
                 </a>
                 <button
@@ -1205,7 +1205,7 @@
               </article>
             {:else}
               <div class="empty-state">
-                <p>{offlineMode ? "No downloaded albums." : "No albums found."}</p>
+                <p class="type-body">{offlineMode ? "No downloaded albums." : "No albums found."}</p>
               </div>
             {/each}
           </div>
@@ -1213,7 +1213,7 @@
       {:else if !loading}
         <div class="empty-state">
           <span>{@render icon("music")}</span>
-          <p>{connectedHost ? "Artist not found." : "Connect your library."}</p>
+          <p class="type-body">{connectedHost ? "Artist not found." : "Connect your library."}</p>
           <a class="primary" href={router.href(connectedHost ? "/library" : "/settings")}
             >{connectedHost ? "Open library" : "Open settings"}</a
           >
@@ -1244,7 +1244,7 @@
         href={artist ? router.href(artistPath(artist)) : router.href("/library")}
         title="Back">{@render icon("back")}</a
       >
-      <strong>Library</strong>
+      <strong class="type-title">Library</strong>
       <a class="topbar-icon" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
@@ -1258,15 +1258,15 @@
       {#if connectedHost && !error && artist && album}
         <div class="section-heading">
           <div>
-            <span class="eyebrow">{artist.name}</span>
-            <h2>{album.name}</h2>
-            <p class="library-meta">
+            <span class="type-eyebrow muted">{artist.name}</span>
+            <h2 class="type-heading">{album.name}</h2>
+            <p class="library-meta type-small">
               {artist.name} · {album.year ?? "Unknown year"} · {visibleTracks.length}
               track{visibleTracks.length === 1 ? "" : "s"}
             </p>
             {#if albumGenres(album).length > 0}
               <div class="genre-list">
-                {#each albumGenres(album) as genre}<span>{genre}</span>{/each}
+                {#each albumGenres(album) as genre}<span class="type-caption">{genre}</span>{/each}
               </div>
             {/if}
           </div>
@@ -1291,7 +1291,7 @@
         {#if offlineScanning}
           <div class="empty-state">
             <div class="scan-spinner">{@render icon("loading")}</div>
-            <p>Checking downloaded music…</p>
+            <p class="type-body">Checking downloaded music…</p>
           </div>
         {:else}
           <div class="track-list">
@@ -1332,7 +1332,7 @@
               </div>
             {:else}
               <div class="empty-state">
-                <p>{offlineMode ? "No downloaded tracks." : "No tracks found."}</p>
+                <p class="type-body">{offlineMode ? "No downloaded tracks." : "No tracks found."}</p>
               </div>
             {/each}
           </div>
@@ -1340,7 +1340,7 @@
       {:else if !loading}
         <div class="empty-state">
           <span>{@render icon("music")}</span>
-          <p>{connectedHost ? "Album not found." : "Connect your library."}</p>
+          <p class="type-body">{connectedHost ? "Album not found." : "Connect your library."}</p>
           <a class="primary" href={router.href(connectedHost ? "/library" : "/settings")}
             >{connectedHost ? "Open library" : "Open settings"}</a
           >
@@ -1353,8 +1353,8 @@
   {#snippet connectLibrary(router: RouteControls)}
     <div class="empty-state">
       <span>{@render icon("music")}</span>
-      <h2>Connect your library</h2>
-      <p>Add your Navidrome server to start listening.</p>
+      <h2 class="type-heading">Connect your library</h2>
+      <p class="type-body">Add your Navidrome server to start listening.</p>
       <a class="primary" href={router.href("/settings")}>Open settings</a>
     </div>
   {/snippet}
@@ -1392,8 +1392,8 @@
         {/if}
       </span>
       <span class="mini-copy stack-xs">
-        <strong>{queue[currentIndex >= 0 ? currentIndex : 0].title}</strong>
-        <small>{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small>
+        <strong class="type-title">{queue[currentIndex >= 0 ? currentIndex : 0].title}</strong>
+        <small class="type-small muted">{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small>
       </span>
       <span
         class="mini-control"
