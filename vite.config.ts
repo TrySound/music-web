@@ -3,4 +3,12 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [svelte()],
+  build: {
+    rollupOptions: {
+      input: {
+        app: "index.html",
+        styleguide: "styleguide.html",
+      },
+    },
+  },
 });

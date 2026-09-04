@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Music Web typography and layout style guide" />
+    <title>Music Web Style Guide</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <style>
+      body {
+        background:
+          radial-gradient(circle at top, rgb(117 101 246 / 16%), transparent 26rem),
+          #10131a;
+      }
+
+      .styleguide {
+        width: min(100% - 2rem, 48rem);
+        margin-inline: auto;
+        padding-block: var(--space-xl) 4rem;
+      }
+
+      .styleguide-intro {
+        max-width: 38rem;
+      }
+
+      .styleguide-panel {
+        padding: clamp(var(--space-md), 4vw, var(--space-xl));
+        border: 1px solid #2c3240;
+        border-radius: 1rem;
+        background: rgb(23 27 35 / 88%);
+        box-shadow: 0 1rem 3rem rgb(0 0 0 / 20%);
+      }
+
+      .type-samples,
+      .stack-samples {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+        gap: var(--space-md);
+      }
+
+      .type-sample,
+      .stack-sample,
+      .control-samples {
+        padding: var(--space-md);
+        border: 1px solid #292f3b;
+        border-radius: 0.75rem;
+        background: #12161e;
+      }
+
+      .type-sample-narrow > :last-child {
+        max-width: 16rem;
+      }
+
+      code {
+        width: fit-content;
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.3rem;
+        color: #bcb4ff;
+        background: #252438;
+        font-family: ui-monospace, monospace;
+        font-size: var(--type-caption-size);
+        line-height: var(--type-caption-line);
+      }
+
+      .control-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+      }
+
+      .control-row button {
+        min-height: 2.8rem;
+        padding: 0.7rem 1.1rem;
+        background: #7565f6;
+      }
+
+      .control-row input {
+        width: min(100%, 20rem);
+      }
+
+      .stack-example {
+        padding: var(--space-md);
+        border-radius: 0.6rem;
+        background: #191d27;
+      }
+
+      .stack-example span {
+        display: block;
+        min-height: 1.25rem;
+        border-radius: 0.3rem;
+        background: linear-gradient(90deg, #7565f6, #a95cb3);
+      }
+
+      .stack-example span:nth-child(2) {
+        width: 72%;
+      }
+
+      .stack-example span:nth-child(3) {
+        width: 45%;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="styleguide stack-xl">
+      <header class="styleguide-intro stack-sm">
+        <span class="type-eyebrow muted">Music Web design system</span>
+        <h1 class="type-heading">Typography and vertical rhythm</h1>
+        <p class="type-body muted">
+          A reference for the semantic type roles and stack spacing used throughout the
+          application.
+        </p>
+      </header>
+
+      <section class="styleguide-panel stack-lg" aria-labelledby="typography-heading">
+        <header class="stack-xs">
+          <span class="type-eyebrow muted">Foundations</span>
+          <h2 class="type-heading" id="typography-heading">Typography</h2>
+        </header>
+
+        <div class="type-samples">
+          <article class="type-sample stack-sm">
+            <code>.type-title</code>
+            <p class="type-title">A compact prominent title</p>
+          </article>
+          <article class="type-sample type-sample-narrow stack-sm">
+            <code>.type-heading</code>
+            <p class="type-heading">A balanced heading that can wrap across lines</p>
+          </article>
+          <article class="type-sample type-sample-narrow stack-sm">
+            <code>.type-body</code>
+            <p class="type-body">
+              Body copy uses comfortable spacing and pretty wrapping for longer explanatory
+              text.
+            </p>
+          </article>
+          <article class="type-sample stack-sm">
+            <code>.type-small</code>
+            <p class="type-small">Supporting information, statuses, and album details</p>
+          </article>
+          <article class="type-sample stack-sm">
+            <code>.type-caption</code>
+            <p class="type-caption">03:24 · FLAC · Downloaded</p>
+          </article>
+          <article class="type-sample stack-sm">
+            <code>.type-eyebrow</code>
+            <p class="type-eyebrow">Your music</p>
+          </article>
+        </div>
+
+        <div class="control-samples stack-sm">
+          <p class="type-title">Control typography</p>
+          <p class="type-small muted">
+            Buttons and inputs consume their typography tokens through element selectors.
+          </p>
+          <div class="control-row">
+            <button type="button">Connect server</button>
+            <input aria-label="Server address example" value="music.example.com" readonly />
+          </div>
+        </div>
+      </section>
+
+      <section class="styleguide-panel stack-lg" aria-labelledby="stacks-heading">
+        <header class="stack-xs">
+          <span class="type-eyebrow muted">Layout</span>
+          <h2 class="type-heading" id="stacks-heading">Vertical stacks</h2>
+          <p class="type-body muted">
+            Stacks use max-content grid rows and own the gap between their children.
+          </p>
+        </header>
+
+        <div class="stack-samples">
+          <article class="stack-sample stack-sm">
+            <code>.stack-xs · 0.25rem</code>
+            <div class="stack-example stack-xs">
+              <span></span><span></span><span></span>
+            </div>
+          </article>
+          <article class="stack-sample stack-sm">
+            <code>.stack-sm · 0.5rem</code>
+            <div class="stack-example stack-sm">
+              <span></span><span></span><span></span>
+            </div>
+          </article>
+          <article class="stack-sample stack-sm">
+            <code>.stack-md · 1rem</code>
+            <div class="stack-example stack-md">
+              <span></span><span></span><span></span>
+            </div>
+          </article>
+          <article class="stack-sample stack-sm">
+            <code>.stack-lg · 1.5rem</code>
+            <div class="stack-example stack-lg">
+              <span></span><span></span><span></span>
+            </div>
+          </article>
+          <article class="stack-sample stack-sm">
+            <code>.stack-xl · 2rem</code>
+            <div class="stack-example stack-xl">
+              <span></span><span></span><span></span>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
