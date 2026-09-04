@@ -718,7 +718,7 @@
     <header class="topbar">
       <span class="topbar-spacer"></span>
       <strong class="type-title">Settings</strong>
-      <a class="topbar-icon" href={router.href("/library")} title="Home"
+      <a class="icon-button" data-size="md" data-variant="neutral" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
     </header>
@@ -761,7 +761,7 @@
           </div>
           <button
             type="button"
-            class="refresh-data"
+            class="button" data-size="md" data-variant="neutral"
             disabled={offlineMode || loading || refreshing}
             onclick={() => loadArtists(activeAuth!, true)}
           >
@@ -806,7 +806,7 @@
             />
           </label>
 
-          <button type="submit" disabled={offlineMode || loading || refreshing}>
+          <button class="button" data-size="md" data-variant="primary" type="submit" disabled={offlineMode || loading || refreshing}>
             {loading
               ? "Connecting…"
               : activeAuth
@@ -858,13 +858,13 @@
     <header class="topbar">
       <button
         type="button"
-        class="topbar-icon"
+        class="icon-button" data-size="md" data-variant="neutral"
         onclick={() => router.back()}
         title="Back"
         >{@render icon("back")}</button
       >
       <strong class="type-title">Now playing</strong>
-      <a class="topbar-icon" href={router.href("/library")} title="Home"
+      <a class="icon-button" data-size="md" data-variant="neutral" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
     </header>
@@ -915,13 +915,16 @@
       <div class="controls">
         <button
           type="button"
+          class="icon-button"
+          data-size="md"
+          data-variant="neutral"
           onclick={previousTrack}
           disabled={currentIndex <= 0}
           title="Previous">{@render icon("previous")}</button
         >
         <button
           type="button"
-          class="play-control"
+          class="icon-button play-control" data-size="lg" data-variant="primary"
           onclick={togglePlayback}
           disabled={queue.length === 0}
           title={isPlaying ? "Pause" : "Play"}
@@ -936,6 +939,9 @@
         </button>
         <button
           type="button"
+          class="icon-button"
+          data-size="md"
+          data-variant="neutral"
           onclick={nextTrack}
           disabled={currentIndex < 0 || currentIndex + 1 >= queue.length}
           title="Next">{@render icon("next")}</button
@@ -954,7 +960,7 @@
           <h2 class="type-heading">{queue.length} track{queue.length === 1 ? "" : "s"}</h2>
         </div>
         {#if queue.length > 0}
-          <button type="button" class="quiet" onclick={clearQueue}>Clear</button
+          <button type="button" class="button" data-size="sm" data-variant="neutral" onclick={clearQueue}>Clear</button
           >
         {/if}
       </div>
@@ -972,7 +978,7 @@
               </button>
               <button
                 type="button"
-                class="row-action"
+                class="icon-button" data-size="sm" data-variant="ghost"
                 onclick={() => downloadQueueTrack(item)}
                 title="Download track"
               >
@@ -1011,7 +1017,7 @@
       <span class="topbar-spacer"></span>
       <strong class="type-title">Library</strong>
       <a
-        class="topbar-icon"
+        class="icon-button" data-size="md" data-variant="neutral"
         href={router.href("/settings")}
         title="Settings">{@render icon("settings")}</a
       >
@@ -1058,7 +1064,7 @@
                 </a>
                 <button
                   type="button"
-                  class="artist-play"
+                  class="icon-button artist-play" data-size="sm" data-variant="overlay"
                   onclick={() => playArtist(artist)}
                 >
                   {#if queue[currentIndex]?.artist === artist.name && playbackLoading}
@@ -1100,11 +1106,11 @@
       : []}
 
     <header class="topbar">
-      <a class="topbar-icon" href={router.href("/library")} title="Back"
+      <a class="icon-button" data-size="md" data-variant="neutral" href={router.href("/library")} title="Back"
         >{@render icon("back")}</a
       >
       <strong class="type-title">Library</strong>
-      <a class="topbar-icon" href={router.href("/library")} title="Home"
+      <a class="icon-button" data-size="md" data-variant="neutral" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
     </header>
@@ -1133,7 +1139,7 @@
           {#if !offlineMode}
             <button
               type="button"
-              class="header-download"
+              class="icon-button" data-size="md" data-variant="neutral"
               onclick={() => downloadArtist(artist)}
               title="Download artist"
             >
@@ -1185,7 +1191,7 @@
                 </a>
                 <button
                   type="button"
-                  class="row-action"
+                  class="icon-button" data-size="sm" data-variant="ghost"
                   onclick={() => playAlbum(artist, album)}
                 >
                   {#if queue[currentIndex]?.album === album.name && queue[currentIndex]?.artist === artist.name && playbackLoading}
@@ -1198,7 +1204,7 @@
                 </button>
                 <button
                   type="button"
-                  class="row-action"
+                  class="icon-button" data-size="sm" data-variant="ghost"
                   onclick={() => addAlbumToQueue(artist, album)}
                   >{@render icon("plus")}</button
                 >
@@ -1214,7 +1220,7 @@
         <div class="empty-state">
           <span>{@render icon("music")}</span>
           <p class="type-body">{connectedHost ? "Artist not found." : "Connect your library."}</p>
-          <a class="primary" href={router.href(connectedHost ? "/library" : "/settings")}
+          <a class="button" data-size="md" data-variant="primary" href={router.href(connectedHost ? "/library" : "/settings")}
             >{connectedHost ? "Open library" : "Open settings"}</a
           >
         </div>
@@ -1240,12 +1246,12 @@
 
     <header class="topbar">
       <a
-        class="topbar-icon"
+        class="icon-button" data-size="md" data-variant="neutral"
         href={artist ? router.href(artistPath(artist)) : router.href("/library")}
         title="Back">{@render icon("back")}</a
       >
       <strong class="type-title">Library</strong>
-      <a class="topbar-icon" href={router.href("/library")} title="Home"
+      <a class="icon-button" data-size="md" data-variant="neutral" href={router.href("/library")} title="Home"
         >{@render icon("home")}</a
       >
     </header>
@@ -1273,7 +1279,7 @@
           {#if !offlineMode}
             <button
               type="button"
-              class="header-download"
+              class="icon-button" data-size="md" data-variant="neutral"
               onclick={() => downloadAlbum(artist, album)}
               title="Download album"
             >
@@ -1307,7 +1313,7 @@
                 </button>
                 <button
                   type="button"
-                  class="row-action"
+                  class="icon-button" data-size="sm" data-variant="ghost"
                   onclick={() => downloadLibraryTrack(artist, album, track)}
                   title="Download track"
                 >
@@ -1325,7 +1331,7 @@
                 </button>
                 <button
                   type="button"
-                  class="row-action"
+                  class="icon-button" data-size="sm" data-variant="ghost"
                   onclick={() => addTrackToQueue(artist, album, track)}
                   >{@render icon("plus")}</button
                 >
@@ -1341,7 +1347,7 @@
         <div class="empty-state">
           <span>{@render icon("music")}</span>
           <p class="type-body">{connectedHost ? "Album not found." : "Connect your library."}</p>
-          <a class="primary" href={router.href(connectedHost ? "/library" : "/settings")}
+          <a class="button" data-size="md" data-variant="primary" href={router.href(connectedHost ? "/library" : "/settings")}
             >{connectedHost ? "Open library" : "Open settings"}</a
           >
         </div>
@@ -1355,7 +1361,7 @@
       <span>{@render icon("music")}</span>
       <h2 class="type-heading">Connect your library</h2>
       <p class="type-body">Add your Navidrome server to start listening.</p>
-      <a class="primary" href={router.href("/settings")}>Open settings</a>
+      <a class="button" data-size="md" data-variant="primary" href={router.href("/settings")}>Open settings</a>
     </div>
   {/snippet}
 
@@ -1396,7 +1402,7 @@
         <small class="type-small muted">{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small>
       </span>
       <span
-        class="mini-control"
+        class="icon-button" data-size="md" data-variant="primary"
         role="button"
         tabindex="0"
         onclick={(event) => {

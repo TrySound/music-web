@@ -9,8 +9,7 @@
     <style>
       body {
         background:
-          radial-gradient(circle at top, rgb(117 101 246 / 16%), transparent 26rem),
-          #10131a;
+          radial-gradient(circle at top, rgb(117 101 246 / 16%), transparent 26rem), #10131a;
       }
 
       .styleguide {
@@ -32,23 +31,11 @@
       }
 
       .type-samples,
-      .stack-samples {
+      .stack-samples,
+      .button-samples {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-        gap: var(--space-md);
-      }
-
-      .type-sample,
-      .stack-sample,
-      .control-samples {
-        padding: var(--space-md);
-        border: 1px solid #292f3b;
-        border-radius: 0.75rem;
-        background: #12161e;
-      }
-
-      .type-sample-narrow > :last-child {
-        max-width: 16rem;
+        gap: var(--space-xl);
       }
 
       code {
@@ -69,10 +56,11 @@
         gap: var(--space-sm);
       }
 
-      .control-row button {
-        min-height: 2.8rem;
-        padding: 0.7rem 1.1rem;
-        background: #7565f6;
+      .button-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
       }
 
       .control-row input {
@@ -102,13 +90,23 @@
     </style>
   </head>
   <body>
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none" aria-hidden="true">
+      <symbol
+        id="guide-plus"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </symbol>
+    </svg>
     <main class="styleguide stack-xl">
       <header class="styleguide-intro stack-sm">
         <span class="type-eyebrow muted">Music Web design system</span>
         <h1 class="type-heading">Typography and vertical rhythm</h1>
         <p class="type-body muted">
-          A reference for the semantic type roles and stack spacing used throughout the
-          application.
+          A reference for the semantic type roles and stack spacing used throughout the application.
         </p>
       </header>
 
@@ -119,44 +117,162 @@
         </header>
 
         <div class="type-samples">
-          <article class="type-sample stack-sm">
+          <article class="stack-sm">
             <code>.type-title</code>
             <p class="type-title">A compact prominent title</p>
           </article>
-          <article class="type-sample type-sample-narrow stack-sm">
+          <article class="stack-sm">
             <code>.type-heading</code>
             <p class="type-heading">A balanced heading that can wrap across lines</p>
           </article>
-          <article class="type-sample type-sample-narrow stack-sm">
+          <article class="stack-sm">
             <code>.type-body</code>
             <p class="type-body">
-              Body copy uses comfortable spacing and pretty wrapping for longer explanatory
-              text.
+              Body copy uses comfortable spacing and pretty wrapping for longer explanatory text.
             </p>
           </article>
-          <article class="type-sample stack-sm">
+          <article class="stack-sm">
             <code>.type-small</code>
             <p class="type-small">Supporting information, statuses, and album details</p>
           </article>
-          <article class="type-sample stack-sm">
+          <article class="stack-sm">
             <code>.type-caption</code>
             <p class="type-caption">03:24 · FLAC · Downloaded</p>
           </article>
-          <article class="type-sample stack-sm">
+          <article class="stack-sm">
             <code>.type-eyebrow</code>
             <p class="type-eyebrow">Your music</p>
           </article>
         </div>
 
-        <div class="control-samples stack-sm">
+        <div class="stack-sm">
           <p class="type-title">Control typography</p>
           <p class="type-small muted">
             Buttons and inputs consume their typography tokens through element selectors.
           </p>
           <div class="control-row">
-            <button type="button">Connect server</button>
+            <button class="button" data-size="md" data-variant="primary" type="button">
+              Connect server
+            </button>
             <input aria-label="Server address example" value="music.example.com" readonly />
           </div>
+        </div>
+      </section>
+
+      <section class="styleguide-panel stack-lg" aria-labelledby="buttons-heading">
+        <header class="stack-xs">
+          <span class="type-eyebrow muted">Controls</span>
+          <h2 class="type-heading" id="buttons-heading">Buttons</h2>
+          <p class="type-body muted">
+            Text and icon buttons share size, variant, focus, and disabled behavior.
+          </p>
+        </header>
+
+        <div class="button-samples">
+          <article class="stack-md">
+            <p class="type-title">Text variants</p>
+            <div class="button-row">
+              <button class="button" data-size="md" data-variant="primary">Primary</button>
+              <button class="button" data-size="md" data-variant="neutral">Neutral</button>
+            </div>
+          </article>
+
+          <article class="stack-md">
+            <p class="type-title">Text sizes</p>
+            <div class="button-row">
+              <button class="button" data-size="sm" data-variant="primary">Small</button>
+              <button class="button" data-size="md" data-variant="primary">Medium</button>
+            </div>
+          </article>
+
+          <article class="stack-md">
+            <p class="type-title">Icon variants</p>
+            <div class="button-row">
+              <button
+                class="icon-button"
+                data-size="md"
+                data-variant="primary"
+                aria-label="Primary icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="md"
+                data-variant="neutral"
+                aria-label="Neutral icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="md"
+                data-variant="ghost"
+                aria-label="Ghost icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="md"
+                data-variant="overlay"
+                aria-label="Overlay icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+            </div>
+          </article>
+
+          <article class="stack-md">
+            <p class="type-title">Icon sizes</p>
+            <div class="button-row">
+              <button
+                class="icon-button"
+                data-size="sm"
+                data-variant="primary"
+                aria-label="Small icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="md"
+                data-variant="primary"
+                aria-label="Medium icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="lg"
+                data-variant="primary"
+                aria-label="Large icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+            </div>
+          </article>
+
+          <article class="stack-md">
+            <p class="type-title">States and links</p>
+            <div class="button-row">
+              <button class="button" data-size="md" data-variant="primary" disabled>
+                Disabled
+              </button>
+              <button
+                class="icon-button"
+                data-size="md"
+                data-variant="neutral"
+                disabled
+                aria-label="Disabled icon"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <a class="button" data-size="md" data-variant="primary" href="#buttons-heading"
+                >Button link</a
+              >
+            </div>
+          </article>
         </div>
       </section>
 
@@ -170,35 +286,25 @@
         </header>
 
         <div class="stack-samples">
-          <article class="stack-sample stack-sm">
+          <article class="stack-sm">
             <code>.stack-xs · 0.25rem</code>
-            <div class="stack-example stack-xs">
-              <span></span><span></span><span></span>
-            </div>
+            <div class="stack-example stack-xs"><span></span><span></span><span></span></div>
           </article>
-          <article class="stack-sample stack-sm">
+          <article class="stack-sm">
             <code>.stack-sm · 0.5rem</code>
-            <div class="stack-example stack-sm">
-              <span></span><span></span><span></span>
-            </div>
+            <div class="stack-example stack-sm"><span></span><span></span><span></span></div>
           </article>
-          <article class="stack-sample stack-sm">
+          <article class="stack-sm">
             <code>.stack-md · 1rem</code>
-            <div class="stack-example stack-md">
-              <span></span><span></span><span></span>
-            </div>
+            <div class="stack-example stack-md"><span></span><span></span><span></span></div>
           </article>
-          <article class="stack-sample stack-sm">
+          <article class="stack-sm">
             <code>.stack-lg · 1.5rem</code>
-            <div class="stack-example stack-lg">
-              <span></span><span></span><span></span>
-            </div>
+            <div class="stack-example stack-lg"><span></span><span></span><span></span></div>
           </article>
-          <article class="stack-sample stack-sm">
+          <article class="stack-sm">
             <code>.stack-xl · 2rem</code>
-            <div class="stack-example stack-xl">
-              <span></span><span></span><span></span>
-            </div>
+            <div class="stack-example stack-xl"><span></span><span></span><span></span></div>
           </article>
         </div>
       </section>
