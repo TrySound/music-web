@@ -67,6 +67,17 @@
         width: min(100%, 20rem);
       }
 
+      .track-demo {
+        max-width: 32rem;
+      }
+
+      .guide-cover {
+        width: 3rem;
+        height: 3rem;
+        border-radius: 0.4rem;
+        background: linear-gradient(145deg, #7665f6, #d35b91);
+      }
+
       .stack-example {
         padding: var(--space-md);
         border-radius: 0.6rem;
@@ -112,7 +123,6 @@
 
       <section class="styleguide-panel stack-lg" aria-labelledby="typography-heading">
         <header class="stack-xs">
-          <span class="type-eyebrow muted">Foundations</span>
           <h2 class="type-heading" id="typography-heading">Typography</h2>
         </header>
 
@@ -161,7 +171,6 @@
 
       <section class="styleguide-panel stack-lg" aria-labelledby="buttons-heading">
         <header class="stack-xs">
-          <span class="type-eyebrow muted">Controls</span>
           <h2 class="type-heading" id="buttons-heading">Buttons</h2>
           <p class="type-body muted">
             Text and icon buttons share size, variant, focus, and disabled behavior.
@@ -276,9 +285,83 @@
         </div>
       </section>
 
+      <section class="styleguide-panel stack-lg" aria-labelledby="tracks-heading">
+        <header class="stack-xs">
+          <h2 class="type-heading" id="tracks-heading">Track lists</h2>
+          <p class="type-body muted">
+            Albums, tracks, and queue items share synchronized leading, content, and action columns.
+          </p>
+        </header>
+
+        <div class="track-list track-demo">
+          <article class="track-item">
+            <span class="track-leading album-leading"><span class="guide-cover"></span></span>
+            <span class="track-content stack-xs">
+              <strong class="type-title">Album item</strong>
+              <small class="type-small muted">2025 · 12 tracks</small>
+            </span>
+            <span class="track-actions">
+              <button
+                class="icon-button"
+                data-size="sm"
+                data-variant="ghost"
+                aria-label="Play album"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="sm"
+                data-variant="ghost"
+                aria-label="Add album"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+            </span>
+          </article>
+          <article class="track-item">
+            <span class="track-leading">1</span>
+            <button class="track-content">
+              <span>A track with a longer title that truncates</span>
+            </button>
+            <span class="track-actions">
+              <button
+                class="icon-button"
+                data-size="sm"
+                data-variant="ghost"
+                aria-label="Download track"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+              <button
+                class="icon-button"
+                data-size="sm"
+                data-variant="ghost"
+                aria-label="Add track"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+            </span>
+          </article>
+          <article class="track-item">
+            <span class="track-leading">12</span>
+            <button class="track-content"><span>Queue item</span></button>
+            <span class="track-actions">
+              <button
+                class="icon-button"
+                data-size="sm"
+                data-variant="ghost"
+                aria-label="Download queue item"
+              >
+                <svg class="icon"><use href="#guide-plus" /></svg>
+              </button>
+            </span>
+          </article>
+        </div>
+      </section>
+
       <section class="styleguide-panel stack-lg" aria-labelledby="stacks-heading">
         <header class="stack-xs">
-          <span class="type-eyebrow muted">Layout</span>
           <h2 class="type-heading" id="stacks-heading">Vertical stacks</h2>
           <p class="type-body muted">
             Stacks use max-content grid rows and own the gap between their children.

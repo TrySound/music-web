@@ -733,7 +733,7 @@
   ></audio>
 
   {#snippet settingsRoute(_params: RouteParams, router: RouteControls)}
-    <header class="topbar">
+    <header class="topbar track-list">
       <span class="topbar-spacer"></span>
       <strong class="type-title">Settings</strong>
       <a
@@ -893,7 +893,7 @@
 
   {#snippet playerDialog()}
     <dialog id="player-dialog" class="player-dialog">
-      <header class="topbar">
+      <header class="topbar track-list">
         <button
           type="button"
           class="icon-button"
@@ -1020,15 +1020,16 @@
           {#if queue.length > 0}
             <div class="track-list">
               {#each queue as item, index}
-                <div class="track-row" class:current={index === currentIndex}>
+                <div class="track-item" class:current={index === currentIndex}>
+                  <span class="track-leading">{index + 1}</span>
                   <button
                     type="button"
-                    class="track-main"
+                    class="track-content"
                     onclick={() => playQueueIndex(index)}
                   >
-                    <span class="track-number">{index + 1}</span>
                     <span>{item.title}</span>
                   </button>
+                  <span class="track-actions">
                   <button
                     type="button"
                     class="icon-button"
@@ -1049,6 +1050,7 @@
                       {@render icon("download")}
                     {/if}
                   </button>
+                  </span>
                 </div>
               {/each}
             </div>
@@ -1069,7 +1071,7 @@
         )
       : artists}
 
-    <header class="topbar">
+    <header class="topbar track-list">
       <span class="topbar-spacer"></span>
       <strong class="type-title">Library</strong>
       <a
@@ -1173,7 +1175,7 @@
         : albumsFor(artist)
       : []}
 
-    <header class="topbar">
+    <header class="topbar track-list">
       <a
         class="icon-button"
         data-size="md"
@@ -1237,16 +1239,16 @@
             <p class="type-body">Checking downloaded music…</p>
           </div>
         {:else}
-          <div class="album-list">
+          <div class="track-list">
             {#each visibleAlbums as album}
               {@const visibleTracks = offlineMode
                 ? tracksFor(album).filter(
                     (track) => trackEngine.getStatus(track.id) === "downloaded",
                   )
                 : tracksFor(album)}
-              <article class="album-row">
+              <article class="track-item">
                 <a
-                  class="album-main"
+                  class="track-leading album-leading"
                   href={router.href(albumPath(artist, album))}
                 >
                   <span class="cover album-cover">
@@ -1269,13 +1271,17 @@
                       <span>{@render icon("music")}</span>
                     {/if}
                   </span>
-                  <span class="album-copy stack-xs">
-                    <strong class="type-title">{album.name}</strong>
-                    <small class="type-small muted"
-                      >{album.year ?? "Unknown year"} · {visibleTracks.length} tracks</small
-                    >
-                  </span>
                 </a>
+                <a
+                  class="track-content stack-xs"
+                  href={router.href(albumPath(artist, album))}
+                >
+                  <strong class="type-title">{album.name}</strong>
+                  <small class="type-small muted"
+                    >{album.year ?? "Unknown year"} · {visibleTracks.length} tracks</small
+                  >
+                </a>
+                <span class="track-actions">
                 <button
                   type="button"
                   class="icon-button"
@@ -1299,6 +1305,7 @@
                   onclick={() => addAlbumToQueue(artist, album)}
                   >{@render icon("plus")}</button
                 >
+                </span>
               </article>
             {:else}
               <div class="empty-state">
@@ -1343,7 +1350,7 @@
         : tracksFor(album)
       : []}
 
-    <header class="topbar">
+    <header class="topbar track-list">
       <a
         class="icon-button"
         data-size="md"
@@ -1413,15 +1420,16 @@
         {:else}
           <div class="track-list">
             {#each visibleTracks as track, index}
-              <div class="track-row">
+              <div class="track-item">
+                <span class="track-leading">{track.track ?? index + 1}</span>
                 <button
                   type="button"
-                  class="track-main"
+                  class="track-content"
                   onclick={() => playTrack(artist, album, track)}
                 >
-                  <span class="track-number">{track.track ?? index + 1}</span>
                   <span>{track.title}</span>
                 </button>
+                <span class="track-actions">
                 <button
                   type="button"
                   class="icon-button"
@@ -1450,6 +1458,7 @@
                   onclick={() => addTrackToQueue(artist, album, track)}
                   >{@render icon("plus")}</button
                 >
+                </span>
               </div>
             {:else}
               <div class="empty-state">
@@ -1510,13 +1519,15 @@
 
   {#snippet miniPlayer()}
     {#if queue.length > 0}
-      <div class="mini-player">
-        <button
-          class="mini-main"
-          type="button"
-          commandfor="player-dialog"
-          command="show-modal"
-        >
+      <div class="mini-player track-list">
+        <div class="track-item">
+          <button
+            class="mini-main"
+            type="button"
+            commandfor="player-dialog"
+            command="show-modal"
+            title="Open player"
+          >
           <span class="mini-art">
             {#if queue[currentIndex >= 0 ? currentIndex : 0].coverArt}
               {@const cover = coverEngine.getCover({
@@ -1547,15 +1558,15 @@
               >{queue[currentIndex >= 0 ? currentIndex : 0].artist}</small
             >
           </span>
-        </button>
-        <button
-          type="button"
-          class="icon-button"
-          data-size="md"
-          data-variant="primary"
-          onclick={togglePlayback}
-          title={isPlaying ? "Pause" : "Play"}
-        >
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            data-size="md"
+            data-variant="primary"
+            onclick={togglePlayback}
+            title={isPlaying ? "Pause" : "Play"}
+          >
           {#if playbackLoading}
             {@render icon("loading")}
           {:else if isPlaying}
@@ -1563,7 +1574,8 @@
           {:else}
             {@render icon("play")}
           {/if}
-        </button>
+          </button>
+        </div>
         <span class="mini-progress"
           ><span style:width={`${playbackPercent()}%`}></span></span
         >
