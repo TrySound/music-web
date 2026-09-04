@@ -41,7 +41,8 @@
 }
 
 * {
-  box-sizing: border-box;
+  scrollbar-color: color-mix(in srgb, #8d7dff 25%, transparent) transparent;
+  scrollbar-width: thin;
 }
 
 .stack-xs,
@@ -149,7 +150,6 @@ input {
   z-index: 30;
   top: 0;
   display: grid;
-  min-height: 3.75rem;
   padding: 0.55rem 0.75rem;
   align-items: center;
   grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
@@ -186,7 +186,6 @@ form {
 }
 
 input:not([type="range"]):not([type="checkbox"]) {
-  width: 100%;
   padding: 0.8rem 0.9rem;
   border: 1px solid #343a48;
   border-radius: 0.7rem;
@@ -209,7 +208,6 @@ input:not([type="range"]):not([type="checkbox"]):focus {
 
 .connection-card summary {
   display: flex;
-  min-height: 4.5rem;
   padding: 0.85rem;
   align-items: center;
   gap: 0.75rem;
@@ -478,6 +476,29 @@ a {
   background: #252438;
 }
 
+.player-dialog {
+  width: min(calc(100% - 2rem), 32rem);
+  max-width: none;
+  height: min(calc(100dvh - 2rem), 52rem);
+  max-height: none;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid #343a48;
+  border-radius: 1rem;
+  color: #f5f6f8;
+  background: #10131a;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 55%);
+}
+
+.player-dialog::backdrop {
+  background: rgb(4 5 8 / 72%);
+  backdrop-filter: blur(6px);
+}
+
+.player-dialog .player-main {
+  height: calc(min(100dvh - 2rem, 52rem) - 6.25rem);
+}
+
 .player-main {
   display: flex;
   height: calc(100dvh - 6.25rem);
@@ -741,7 +762,6 @@ a {
   left: 0.6rem;
   display: flex;
   max-width: 30.8rem;
-  min-height: 4rem;
   margin: 0 auto;
   padding: 0.5rem;
   align-items: center;
@@ -751,6 +771,21 @@ a {
   text-align: left;
   background: #1c212b;
   box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 45%);
+}
+
+.mini-main {
+  display: flex;
+  min-width: 0;
+  padding: 0;
+  align-items: center;
+  flex: 1;
+  gap: 0.7rem;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .mini-art {
@@ -797,4 +832,17 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 34rem) {
+  .player-dialog {
+    width: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .player-dialog .player-main {
+    height: calc(100dvh - 6.25rem);
+  }
 }
